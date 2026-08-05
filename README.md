@@ -1,4 +1,29 @@
-# Noema — Experimento 0: Handoff Latente
+# Noema — comunicação entre agentes sem texto como veículo do pensamento
+
+Experimentos com transferência direta de estado interno (KV-cache) entre agentes:
+
+- **Experimento 0 — Handoff Latente** (`noema_exp0/`): o canal existe? *Resultado: sim —
+  L 56% × T 54% × Z 0% em 50 problemas GSM8K, 0 tokens de texto trafegados, KL = 0.*
+- **Experimento 1 — Wire Format** (`noema_exp1/`): quanto do cache é essencial?
+  Curvas de degradação: quantização (int8/int4) × janela temporal × corte de camadas.
+
+## Experimento 1 — como rodar
+
+Pré-requisito: caches do Exp 0 em `noema_exp0/caches/` (gerados pela rodada completa;
+se foram apagados, regenere com `cd noema_exp0 && python agente_a.py`).
+
+```bash
+cd noema_exp1
+python run_exp1.py                          # 9 configurações × 50 problemas
+python run_exp1.py --configs int8,int4      # subconjunto
+```
+
+Saída: `noema_exp1/resultados/relatorio_exp1.md` + `curva.png` (bytes × acurácia).
+Sem rede/GPU, o protocolo é validável com `python teste_mecanico_exp1.py`.
+
+---
+
+# Experimento 0: Handoff Latente
 
 Primeiro experimento do projeto **Noema**: comunicação entre agentes de IA sem texto como
 veículo do pensamento. O agente A raciocina sobre um problema do GSM8K, é interrompido no

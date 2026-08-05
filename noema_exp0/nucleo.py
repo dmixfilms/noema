@@ -40,13 +40,24 @@ def _mask(cache: DynamicCache, ids: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def _passo(model, ids: torch.Tensor, cache: DynamicCache):
-    """Um forward sobre `ids` estendendo `cache`. Retorna (logits do último token, argmax)."""
+def _passo(model, ids: torch.Tensor, cache: DynamicCache, pos: int | None = None):
+    """Um forward sobre `ids` estendendo `cache`. Retorna (logits do último token, argmax).
+
+    `pos` (opcional) fixa a posição absoluta do primeiro token novo — necessário
+    quando o cache foi truncado temporalmente (Exp 1) e a posição real não é
+    mais igual ao comprimento do cache.
+    """
+    kwargs = {}
+    if pos is not None:
+        kwargs["position_ids"] = torch.arange(
+            pos, pos + ids.shape[1], device=ids.device
+        ).unsqueeze(0)
     out = model(
         ids,
         past_key_values=cache,
         use_cache=True,
         attention_mask=_mask(cache, ids),
+        **kwargs,
     )
     logits = out.logits[:, -1]
     return logits, logits.argmax(-1, keepdim=True)
@@ -137,8 +148,11 @@ def carregar_cache(caminho: str) -> DynamicCache:
 
 @torch.no_grad()
 def gerar_greedy(ids: torch.Tensor, cache: DynamicCache | None = None,
-                 max_new: int = config.MAX_NEW_B):
+                 max_new: int = config.MAX_NEW_B, pos_offset: int | None = None):
     """Continua a geração greedy a partir de `ids` (sobre um cache herdado, se houver).
+
+    `pos_offset` fixa a posição absoluta do primeiro token de `ids` quando o
+    cache herdado foi truncado (Exp 1); None mantém o comportamento padrão.
 
     Retorna (texto, t_prefill_s): t_prefill é o tempo do primeiro forward — na
     condição T ele é o custo real do canal textual (B re-processa todo o contexto);
@@ -147,17 +161,22 @@ def gerar_greedy(ids: torch.Tensor, cache: DynamicCache | None = None,
     tok, model = carregar_modelo()
     if cache is None:
         cache = DynamicCache()
+    pos = pos_offset
 
     t0 = time.time()
-    _, next_id = _passo(model, ids, cache)
+    _, next_id = _passo(model, ids, cache, pos=pos)
     t_prefill = time.time() - t0
+    if pos is not None:
+        pos += ids.shape[1]
 
     resposta = []
     for _ in range(max_new):
         if next_id.item() == tok.eos_token_id:
             break
         resposta.append(next_id)
-        _, next_id = _passo(model, next_id, cache)
+        _, next_id = _passo(model, next_id, cache, pos=pos)
+        if pos is not None:
+            pos += 1
 
     texto = (
         tok.decode(torch.cat(resposta, dim=-1)[0], skip_special_tokens=True)
