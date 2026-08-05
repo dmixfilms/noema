@@ -1,0 +1,6 @@
+noema_env/
+__pycache__/
+*.pyc
+noema_exp0/caches/
+*.pt
+.cache/
