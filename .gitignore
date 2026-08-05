@@ -2,5 +2,6 @@ noema_env/
 __pycache__/
 *.pyc
 noema_exp0/caches/
+noema_exp0/modelo_teste/
 *.pt
 .cache/

@@ -107,6 +107,8 @@ def main():
                     help="pula o piloto e usa este N fixo")
     ap.add_argument("--kl", action="store_true",
                     help="métrica bônus: fidelidade da transferência (10 problemas)")
+    ap.add_argument("--problemas-prontos", action="store_true",
+                    help="usa o problemas.jsonl existente em vez de baixar o GSM8K")
     args = ap.parse_args()
 
     torch.manual_seed(config.SEED)
@@ -115,7 +117,11 @@ def main():
     n = args.n_problemas or (3 if args.smoke else config.N_PROBLEMAS)
     n_corte = args.n_corte or (80 if args.smoke else None)
 
-    preparar_problemas(n)
+    if args.problemas_prontos:
+        n = len(metrics.ler_jsonl(config.ARQ_PROBLEMAS))
+        print(f"[orq] usando {n} problemas já preparados em {config.ARQ_PROBLEMAS}")
+    else:
+        preparar_problemas(n)
 
     args_a = ["--n-corte", str(n_corte)] if n_corte else []
     rodar_subprocesso("agente_a.py", *args_a)

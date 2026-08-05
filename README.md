@@ -44,6 +44,17 @@ Sem GPU (só para validar o protocolo — lento e com modelo menor):
 NOEMA_MODEL=Qwen/Qwen2.5-0.5B-Instruct python run_experiment.py --smoke
 ```
 
+Modelos já baixados no cache local do HuggingFace (`~/.cache/huggingface`) são
+reaproveitados automaticamente; `NOEMA_MODEL` também aceita um caminho local.
+
+Sem rede nenhuma, há um smoke test mecânico que valida todo o protocolo (processos
+separados, serialização do cache, 3 condições, KL) com um modelo minúsculo de pesos
+aleatórios — não valida acurácia, valida o instrumento:
+
+```bash
+python teste_mecanico.py
+```
+
 ## Estrutura
 
 ```
