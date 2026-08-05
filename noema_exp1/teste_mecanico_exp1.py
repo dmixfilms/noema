@@ -76,7 +76,10 @@ def testar_pipeline():
 
     curva = json.load(open(RAIZ / "resultados" / "curva.json", encoding="utf-8"))
     tags = {p["tag"] for p in curva}
-    assert {"base_fp16", "int4", "jan8_teste", "cam1_teste"} <= tags, tags
+    assert {"base_fp16", "int4"} <= tags, tags
+    # pontos _teste ficam fora da curva, mas os resultados devem existir
+    for t in ["jan8_teste", "cam1_teste"]:
+        assert (RAIZ / "resultados" / f"resultados_{t}.jsonl").exists(), t
     base = next(p for p in curva if p["tag"] == "base_fp16")
     int4 = next(p for p in curva if p["tag"] == "int4")
     assert 0 < int4["bytes_medio"] < base["bytes_medio"], "int4 não comprimiu"
