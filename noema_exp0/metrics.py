@@ -4,6 +4,7 @@ import re
 import statistics
 
 _NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+_PARENTESES = re.compile(r"\([^)]*\)")
 
 
 def _normalizar(s: str):
@@ -21,7 +22,10 @@ def extrair_gold(answer: str):
 
 
 def extrair_resposta(texto: str):
-    """Último número da geração de B."""
+    """Último número da geração de B, ignorando apartes entre parênteses —
+    "a total of 3 bolts (2 blue and 1 white)" responde 3, não 1. A mesma
+    régua vale para as três condições."""
+    texto = _PARENTESES.sub(" ", texto)
     for n in reversed(_NUM.findall(texto)):
         v = _normalizar(n)
         if v is not None:
