@@ -26,7 +26,9 @@ python -m venv noema_env
 noema_env\Scripts\activate                 # Windows
 # source noema_env/bin/activate            # Linux/macOS
 
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+pip install torch --index-url https://download.pytorch.org/whl/cu121   # GPUs até Ada (RTX 40xx)
+# GPUs Blackwell (RTX 50xx, sm_120) exigem o wheel cu128:
+# pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install "transformers>=4.46,<5" accelerate datasets matplotlib
 
 cd noema_exp0

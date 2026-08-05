@@ -19,7 +19,9 @@ CUT_RATIO = 0.6          # corte do raciocínio: 60% do comprimento médio de um
 N_PILOTO = 5             # problemas usados na calibração de N
 MAX_COT_PILOTO = 512     # teto de tokens p/ um CoT completo no piloto
 N_MIN, N_MAX = 32, 256   # clamp do N de corte
-MAX_NEW_B = 48           # tokens que B pode gerar
+# Tokens que B pode gerar. 48 (valor do protocolo original) trunca B no meio da
+# resposta quando o corte cai cedo no CoT — 160 dá folga p/ concluir o raciocínio.
+MAX_NEW_B = int(os.environ.get("NOEMA_MAX_NEW_B", "160"))
 
 SUFIXO = "\nResposta final:"
 

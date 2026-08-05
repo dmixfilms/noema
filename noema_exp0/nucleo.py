@@ -20,8 +20,13 @@ def carregar_modelo():
     global _tok, _model
     if _model is None:
         _tok = AutoTokenizer.from_pretrained(config.MODEL)
+        # transformers >= 4.56 renomeou torch_dtype → dtype
+        import transformers
+        from packaging import version
+        kw_dtype = ("dtype" if version.parse(transformers.__version__)
+                    >= version.parse("4.56.0") else "torch_dtype")
         _model = AutoModelForCausalLM.from_pretrained(
-            config.MODEL, torch_dtype=config.DTYPE, device_map=config.DEVICE
+            config.MODEL, device_map=config.DEVICE, **{kw_dtype: config.DTYPE}
         )
         _model.eval()
     return _tok, _model
@@ -123,7 +128,7 @@ def serializar_cache(cache: DynamicCache, caminho: str) -> int:
 
 def carregar_cache(caminho: str) -> DynamicCache:
     """Reconstrói o cache no device via cache.update() — API estável entre versões."""
-    payload = torch.load(caminho, map_location=config.DEVICE)
+    payload = torch.load(caminho, map_location=config.DEVICE, weights_only=True)
     cache = DynamicCache()
     for i, (k, v) in enumerate(zip(payload["k"], payload["v"])):
         cache.update(k.to(config.DEVICE), v.to(config.DEVICE), i)
