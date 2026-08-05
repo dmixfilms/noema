@@ -33,6 +33,11 @@ CONFIGS = [
     {"tag": "cam24", "camadas": 24},
     {"tag": "cam12", "camadas": 12},
     {"tag": "int4_jan64", "quant": "int4", "janela": 64},
+    # Refino pós-primeira rodada: empilhar os eixos vencedores (quantização ×
+    # camadas) e localizar o penhasco entre 12 e 24 camadas.
+    {"tag": "cam18", "camadas": 18},
+    {"tag": "int8_cam24", "quant": "int8", "camadas": 24},
+    {"tag": "int4_cam24", "quant": "int4", "camadas": 24},
 ]
 
 # Configurações do teste mecânico (modelo minúsculo) — só rodam se pedidas
@@ -89,13 +94,18 @@ def main():
     universo = CONFIGS + (CONFIGS_TESTE if tags else [])
     configs = [c for c in universo if tags is None or c["tag"] in tags]
 
-    curva = []
+    # Rodadas parciais (--configs) acumulam sobre a curva existente em vez de
+    # sobrescrevê-la; pontos do teste mecânico (_teste) ficam de fora.
+    arq_curva = DIR_RESULTADOS / "curva.json"
+    DIR_RESULTADOS.mkdir(exist_ok=True)
+    pontos = ({p["tag"]: p for p in json.load(open(arq_curva, encoding="utf-8"))}
+              if arq_curva.exists() else {})
     for cfg in configs:
         rodar_config(cfg)
-        curva.append(corrigir(cfg["tag"]))
+        pontos[cfg["tag"]] = corrigir(cfg["tag"])
 
-    DIR_RESULTADOS.mkdir(exist_ok=True)
-    with open(DIR_RESULTADOS / "curva.json", "w", encoding="utf-8") as f:
+    curva = [p for t, p in pontos.items() if not t.endswith("_teste")]
+    with open(arq_curva, "w", encoding="utf-8") as f:
         json.dump(curva, f, ensure_ascii=False, indent=2)
     print(f"[orq1] curva com {len(curva)} pontos → {DIR_RESULTADOS / 'curva.json'}")
 

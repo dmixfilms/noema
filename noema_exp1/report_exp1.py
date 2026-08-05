@@ -18,6 +18,9 @@ ROTULOS = {
     "cam24": "só as últimas 24 camadas (de 36)",
     "cam12": "só as últimas 12 camadas (de 36)",
     "int4_jan64": "int4 + janela de 64 (combinação agressiva)",
+    "cam18": "só as últimas 18 camadas (de 36)",
+    "int8_cam24": "int8 + últimas 24 camadas",
+    "int4_cam24": "int4 + últimas 24 camadas",
 }
 
 
