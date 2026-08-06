@@ -52,21 +52,24 @@ def grafico(curva):
 
 def relatorio(curva):
     base = next((p for p in curva if p["tag"] == "base_fp16"), None)
+    arq_kl = DIR_RESULTADOS / "fidelidade_exp1.json"
+    kls = json.load(open(arq_kl, encoding="utf-8")) if arq_kl.exists() else {}
     linhas = [
         "# Experimento 1 — Wire Format: relatório",
         "",
         f"Modelo: `{config.MODEL}` | 50 problemas GSM8K | caches do Exp 0 | "
         "geração greedy, seed 42",
         "",
-        "| Configuração | Acurácia | MB/handoff | % do original | Handoff (s) |",
-        "|---|---|---|---|---|",
+        "| Configuração | Acurácia | MB/handoff | % do original | Handoff (s) | KL |",
+        "|---|---|---|---|---|---|",
     ]
     original = base["bytes_medio"] if base else None
     for p in curva:
         pct = f"{p['bytes_medio'] / original * 100:.0f}%" if original else "—"
+        kl = f"{kls[p['tag']]:.3f}" if p["tag"] in kls else "—"
         linhas.append(
             f"| {ROTULOS.get(p['tag'], p['tag'])} | {p['acuracia']:.1%} | "
-            f"{p['bytes_medio'] / 1e6:.2f} | {pct} | {p['handoff_medio_s']:.3f} |"
+            f"{p['bytes_medio'] / 1e6:.2f} | {pct} | {p['handoff_medio_s']:.3f} | {kl} |"
         )
     linhas += ["", "![curva](curva.png)", ""]
 

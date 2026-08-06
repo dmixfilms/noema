@@ -59,6 +59,7 @@ def comprimir(k_list, v_list, quant="fp16", janela=None, camadas=None) -> dict:
     """Monta o pacote wire a partir das listas K/V por camada (tensores CPU)."""
     n_camadas = len(k_list)
     seq_len = k_list[0].shape[2]
+    camadas = min(camadas, n_camadas) if camadas else None
     transmitidas = (list(range(n_camadas)) if not camadas
                     else list(range(n_camadas - camadas, n_camadas)))
     if janela and SINK + janela < seq_len:

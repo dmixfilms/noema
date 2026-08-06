@@ -18,12 +18,13 @@ RAIZ = Path(__file__).resolve().parent
 DIR_MODELO = RAIZ / "modelo_teste"
 
 
-def construir_modelo_teste():
+def construir_modelo_teste(destino=None, hidden=64, seed=42):
     import torch
     from tokenizers import Tokenizer, models, pre_tokenizers, trainers
     from transformers import PreTrainedTokenizerFast, Qwen2Config, Qwen2ForCausalLM
 
-    torch.manual_seed(42)
+    destino = Path(destino) if destino else DIR_MODELO
+    torch.manual_seed(seed)
 
     corpus = [
         "Quanto é 2 + 2? Pense passo a passo. Resposta final: 4",
@@ -52,8 +53,8 @@ def construir_modelo_teste():
 
     cfg = Qwen2Config(
         vocab_size=len(tok),
-        hidden_size=64,
-        intermediate_size=128,
+        hidden_size=hidden,
+        intermediate_size=hidden * 2,
         num_hidden_layers=2,
         num_attention_heads=4,
         num_key_value_heads=2,
@@ -61,11 +62,11 @@ def construir_modelo_teste():
     )
     modelo = Qwen2ForCausalLM(cfg)
 
-    DIR_MODELO.mkdir(exist_ok=True)
-    tok.save_pretrained(DIR_MODELO)
-    modelo.save_pretrained(DIR_MODELO)
+    destino.mkdir(exist_ok=True)
+    tok.save_pretrained(destino)
+    modelo.save_pretrained(destino)
     print(f"[teste] modelo aleatório ({sum(p.numel() for p in modelo.parameters()):,} "
-          f"parâmetros) salvo em {DIR_MODELO}")
+          f"parâmetros) salvo em {destino}")
 
 
 def preparar_problemas_fake():

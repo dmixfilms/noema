@@ -4,5 +4,9 @@ __pycache__/
 noema_exp0/caches/
 noema_exp0/modelo_teste/
 noema_exp1/wire_tmp/
+noema_exp05/estados/
+noema_exp2/dados/
+noema_exp2/modelo_teste_*/
+noema_exp2/textos_teste.jsonl
 *.pt
 .cache/

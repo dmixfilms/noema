@@ -5,7 +5,13 @@ Experimentos com transferência direta de estado interno (KV-cache) entre agente
 - **Experimento 0 — Handoff Latente** (`noema_exp0/`): o canal existe? *Resultado: sim —
   L 56% × T 54% × Z 0% em 50 problemas GSM8K, 0 tokens de texto trafegados, KL = 0.*
 - **Experimento 1 — Wire Format** (`noema_exp1/`): quanto do cache é essencial?
-  Curvas de degradação: quantização (int8/int4) × janela temporal × corte de camadas.
+  *Resultado: int4 + últimas 24 camadas = 56% (igual ao baseline) com 17% dos bytes.*
+  Bônus: `fidelidade_exp1.py` mede o KL de cada configuração vs. o cache cheio.
+- **Experimento 0.5 — Pensamento contínuo** (`noema_exp05/`): em vez do cache (MB),
+  só os hidden states finais viajam (~KB), injetados em B via `inputs_embeds`.
+- **Experimento 2 — Interlíngua** (`noema_exp2/`): handoff entre modelos DIFERENTES
+  (Qwen2.5-3B → Qwen2.5-1.5B) via adaptador ridge treinado no GSM8K train.
+  Condições: ponte (h_A×W→B) × controle (W aleatória) × teto (B com os próprios h).
 
 ## Experimento 1 — como rodar
 
