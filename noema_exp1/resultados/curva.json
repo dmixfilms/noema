@@ -1,0 +1,86 @@
+[
+  {
+    "tag": "base_fp16",
+    "n": 50,
+    "acuracia": 0.56,
+    "bytes_medio": 9375797.48,
+    "handoff_medio_s": 0.02035811424255371
+  },
+  {
+    "tag": "int8",
+    "n": 50,
+    "acuracia": 0.56,
+    "bytes_medio": 4717151.64,
+    "handoff_medio_s": 0.039932332038879394
+  },
+  {
+    "tag": "int4",
+    "n": 50,
+    "acuracia": 0.54,
+    "bytes_medio": 2378996.12,
+    "handoff_medio_s": 0.05138920783996582
+  },
+  {
+    "tag": "jan128",
+    "n": 50,
+    "acuracia": 0.02,
+    "bytes_medio": 4888349.4,
+    "handoff_medio_s": 0.020259275436401367
+  },
+  {
+    "tag": "jan64",
+    "n": 50,
+    "acuracia": 0.12,
+    "bytes_medio": 2528975.4,
+    "handoff_medio_s": 0.01957552433013916
+  },
+  {
+    "tag": "jan32",
+    "n": 50,
+    "acuracia": 0.1,
+    "bytes_medio": 1349327.4,
+    "handoff_medio_s": 0.01859856128692627
+  },
+  {
+    "tag": "cam24",
+    "n": 50,
+    "acuracia": 0.64,
+    "bytes_medio": 6250577.32,
+    "handoff_medio_s": 0.01553009033203125
+  },
+  {
+    "tag": "cam12",
+    "n": 50,
+    "acuracia": 0.1,
+    "bytes_medio": 3125809.96,
+    "handoff_medio_s": 0.01045081615447998
+  },
+  {
+    "tag": "int4_jan64",
+    "n": 50,
+    "acuracia": 0.1,
+    "bytes_medio": 668275.0,
+    "handoff_medio_s": 0.04904515743255615
+  },
+  {
+    "tag": "cam18",
+    "n": 50,
+    "acuracia": 0.44,
+    "bytes_medio": 4688137.32,
+    "handoff_medio_s": 0.012892942428588867
+  },
+  {
+    "tag": "int8_cam24",
+    "n": 50,
+    "acuracia": 0.62,
+    "bytes_medio": 3145606.36,
+    "handoff_medio_s": 0.028589887619018553
+  },
+  {
+    "tag": "int4_cam24",
+    "n": 50,
+    "acuracia": 0.56,
+    "bytes_medio": 1586801.88,
+    "handoff_medio_s": 0.03668609619140625
+  }
+]
