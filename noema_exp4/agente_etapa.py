@@ -50,20 +50,50 @@ def _gerar(ids, cache, max_new):
     return texto, t_prefill, cache
 
 
+def _com_prefixo(tok, ids, etapa):
+    """Anexa o prefixo de resposta (ex.: 'Resposta final:') já dentro do turno
+    do assistente, quando a etapa o define."""
+    if etapa.get("prefixo_resposta"):
+        pre = tok(etapa["prefixo_resposta"], return_tensors="pt",
+                  add_special_tokens=False).input_ids
+        ids = torch.cat([ids, pre], dim=-1)
+    return ids
+
+
 def _contexto_textual(tok, problema, saidas, etapa_idx):
     """Remonta em linguagem o que a etapa recebe — o jeito clássico: o agente
     lê o problema e o trabalho de todos os anteriores, do zero."""
+    etapa = ETAPAS[etapa_idx]
     partes = [f"Problema: {problema}"]
     for i, texto in enumerate(saidas):
         partes.append(f"{ETAPAS[i + 1]['rotulo_textual']}: {texto}")
-    conteudo = "\n\n".join(partes) + "\n\n" + ETAPAS[etapa_idx]["instrucao_papel"].strip()
+    conteudo = "\n\n".join(partes) + "\n\n" + etapa["instrucao"]
     msgs = [{"role": "user", "content": conteudo}]
     ids = tok.apply_chat_template(msgs, add_generation_prompt=True,
                                   return_tensors="pt")
+    ids = _com_prefixo(tok, ids, etapa)
     # tokens de CONTEÚDO trafegados até esta etapa (fora a instrução fixa de papel)
     conteudo_trafegado = problema + "".join(saidas) if etapa_idx else ""
     n_conteudo = len(tok(conteudo_trafegado, add_special_tokens=False).input_ids)
     return ids.to(config.DEVICE), n_conteudo
+
+
+def _turno_L(tok, etapa):
+    """A instrução de papel como turno estruturado sobre o cache herdado:
+    fecha o turno do assistente anterior, abre um turno de usuário com a
+    instrução fixa e reabre o assistente (com o prefixo de resposta, se houver).
+    São só tokens de protocolo — nenhum conteúdo do problema viaja."""
+    tpl = tok.chat_template or ""
+    inst = etapa["instrucao"]
+    if "<|im_start|>" in tpl:  # família Qwen
+        txt = f"<|im_end|>\n<|im_start|>user\n{inst}<|im_end|>\n<|im_start|>assistant\n"
+    elif "<|user|>" in tpl:    # modelo minúsculo dos testes mecânicos
+        txt = f"<|end|><|user|>{inst}<|end|><|assistant|>"
+    else:                      # template desconhecido: injeção direta
+        txt = "\n\n" + inst + "\n"
+    if etapa.get("prefixo_resposta"):
+        txt += etapa["prefixo_resposta"]
+    return tok(txt, return_tensors="pt", add_special_tokens=False).input_ids
 
 
 def main():
@@ -99,18 +129,18 @@ def main():
             # Porta de entrada: idêntica nas duas vias — o problema entra por
             # texto uma única vez (tokenização de entrada, não comunicação).
             msgs = [{"role": "user", "content": p["pergunta"] + "\n" +
-                     etapa["instrucao_papel"]}]
+                     etapa["instrucao"]}]
             ids = tok.apply_chat_template(msgs, add_generation_prompt=True,
-                                          return_tensors="pt").to(config.DEVICE)
+                                          return_tensors="pt")
+            ids = _com_prefixo(tok, ids, etapa).to(config.DEVICE)
             cache, n_conteudo, t_handoff = DynamicCache(), 0, 0.0
         elif args.condicao == "L":
-            # Herda o pensamento da etapa anterior; só a instrução de papel viaja.
+            # Herda o pensamento da etapa anterior; só o turno fixo de papel viaja.
             t0 = time.time()
             cache = nucleo.carregar_cache(
                 str(DIR_CACHES / f"cache_e{args.etapa - 1}_{p['id']}.pt"))
             t_handoff = time.time() - t0
-            ids = tok(etapa["instrucao_papel"], return_tensors="pt",
-                      add_special_tokens=False).input_ids.to(config.DEVICE)
+            ids = _turno_L(tok, etapa).to(config.DEVICE)
             n_conteudo = 0
         else:
             # Via textual: relê problema + saídas anteriores, do zero.
