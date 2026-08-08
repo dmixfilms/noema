@@ -73,7 +73,11 @@ def main():
     args = ap.parse_args()
 
     torch.manual_seed(config.SEED)
-    tok, _ = nucleo.carregar_modelo()
+    tok, model = nucleo.carregar_modelo()
+    # Aquecimento: o 1º forward de cada processo paga a inicialização dos
+    # kernels CUDA (~200 ms) — fora do cronômetro p/ não poluir o prefill.
+    with torch.no_grad():
+        model(tok("aquecer", return_tensors="pt").input_ids.to(config.DEVICE))
     etapa = ETAPAS[args.etapa]
     max_new = etapa["max_tokens"] or config.MAX_NEW_B
     DIR_RESULTADOS.mkdir(exist_ok=True)
