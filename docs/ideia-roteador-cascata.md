@@ -39,6 +39,23 @@ Token local não custa dinheiro por chamada, mas custa três coisas reais:
    reconstruído diferente pelo grande. A escalada latente transfere a compreensão,
    não a transcrição (Exp 0: KL = 0).
 
+## Nota de segurança (importante — corrige uma intuição comum)
+
+O canal latente NÃO é criptografia. O KV-cache contém os dados integralmente
+(Exp 0: KL = 0, nada se perde) e o decodificador é público: qualquer pessoa com
+o arquivo + o checkpoint (aberto) extrai o conteúdo — o próprio agente_b.py do
+Exp 0 é a ferramenta de extração. Nível de vazamento ≈ texto puro para um
+atacante competente, com o agravante de dar falsa sensação de segurança e de
+cegar as ferramentas de auditoria (DLP/logs não inspecionam tensores). Políticas
+treinadas no modelo não protegem o cache: ele pode ser sondado sem gerar texto
+(linear probing).
+
+O que protege de verdade: criptografia clássica no canal e em repouso, zonas de
+confiança (cache sensível nunca cruza o perímetro) e a camada de contratos do
+Exp 3 — obrigatória justamente porque o canal é inauditável. O pitch correto é
+"mais rápido, mais fiel, mais barato, com segurança clássica e auditabilidade
+pela camada simbólica" — nunca "seguro porque ilegível".
+
 ## Estado da técnica (interno)
 
 - Escalada entre cópias do MESMO modelo: funciona hoje (Exp 0/1; wire format
