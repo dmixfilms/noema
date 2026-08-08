@@ -20,19 +20,15 @@ def main():
     teste_mecanico.construir_modelo_teste(destino=DIR_B, hidden=48, seed=43)
     teste_mecanico.preparar_problemas_fake()
 
-    # textos de alinhamento locais (sem rede)
-    textos = RAIZ / "textos_teste.jsonl"
-    with open(textos, "w", encoding="utf-8") as f:
-        for i in range(30):
-            f.write(json.dumps({"texto": f"Maria tem {i} maçãs e ganha {i + 1}. "
-                                          f"Total de {2 * i + 1} maçãs."}) + "\n")
-
     env = dict(os.environ, NOEMA_MODEL=str(DIR_A))
     subprocess.run([sys.executable, str(EXP0 / "agente_a.py"), "--n-corte", "16"],
                    check=True, cwd=EXP0, env=env)
 
+    # treino local: os próprios problemas fake servem de "train" no teste
+    import config  # noqa: E402
     env2 = dict(os.environ, NOEMA_MODEL_A=str(DIR_A), NOEMA_MODEL_B=str(DIR_B),
-                NOEMA_TEXTOS=str(textos), NOEMA_STRIDE="4")
+                NOEMA_TREINO_LOCAL=str(config.ARQ_PROBLEMAS),
+                NOEMA_AQUECIMENTO="2", NOEMA_STRIDE="2", NOEMA_K="4")
     subprocess.run([sys.executable, str(RAIZ / "run_exp2.py")],
                    check=True, cwd=RAIZ, env=env2)
 

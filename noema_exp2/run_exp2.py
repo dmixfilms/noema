@@ -1,18 +1,24 @@
-"""Experimento 2 — Interlíngua: handoff entre modelos DIFERENTES.
+"""Experimento 2 v0.3 — Interlíngua: handoff entre modelos DIFERENTES.
 
 O agente A (Qwen2.5-3B) pensa; o agente B (Qwen2.5-1.5B — outro modelo, outras
-dimensões) conclui. A ponte é um adaptador linear W treinado por regressão
-ridge para traduzir hidden states do espaço de A (2048d) para o de B (1536d),
-usando textos do split TRAIN do GSM8K (nunca o test). O canal é o mesmo do
-Exp 0.5: os últimos K hidden states viajam como pensamento contínuo.
+dimensões) conclui, recebendo K "palavras-suaves": os últimos K hidden states
+de A decodificados para o espaço de EMBEDDINGS de B por um adaptador ridge.
+
+Lições das v0.1/v0.2 (nulos documentados em resultados/): hidden states crus
+degeneram; adaptador treinado em texto corrido sofre desvio de domínio (estados
+de raciocínio sob chat template vivem noutra região). A v0.3 corrige:
+  - treino NO DOMÍNIO: os modelos raciocinam (chat template, greedy) sobre
+    problemas do GSM8K train, e os pares são (estado no passo t → embedding do
+    token emitido em t), colhidos ao longo da geração inteira;
+  - canal mais largo: K=16 estados (era 4).
 
 Condições na avaliação (50 problemas do test):
-  ponte     — h_A × W → B                (a tese)
-  controle  — h_A × W_aleatória → B      (a ponte importa, ou qualquer vetor serve?)
-  teto      — B pensa sozinho e usa os próprios h  (limite superior deste canal)
+  ponte     — h_A × W_ponte → B          (a tese)
+  controle  — h_A × W_aleatória → B      (piso de ruído)
+  teto      — h_B próprios × W_self → B  (limite superior deste canal)
 
-Fases em subprocessos separados (1 modelo por vez na VRAM):
-  python run_exp2.py            # tudo: coleta A/B → treina W → avalia 3 condições
+Fases em subprocessos (1 modelo por vez na VRAM):
+  python run_exp2.py            # tudo: coleta A → coleta B → treina → avalia
 """
 import json
 import os
@@ -32,60 +38,95 @@ MODEL_B = os.environ.get("NOEMA_MODEL_B", "Qwen/Qwen2.5-1.5B-Instruct")
 
 DIR_DADOS = RAIZ / "dados"
 DIR_RESULTADOS = RAIZ / "resultados"
-N_TEXTOS_TREINO = 400
-MAX_TOK_TREINO = 192
-STRIDE = int(os.environ.get("NOEMA_STRIDE", "16"))  # 1 estado a cada STRIDE tokens
-K_ESTADOS = 4
-RIDGE_LAMBDA = 1.0
+N_PROBLEMAS_TREINO = int(os.environ.get("NOEMA_N_TREINO", "150"))
+K_ESTADOS = int(os.environ.get("NOEMA_K", "16"))
+AQUECIMENTO = int(os.environ.get("NOEMA_AQUECIMENTO", "8"))   # pula o início do CoT
+STRIDE_GEN = int(os.environ.get("NOEMA_STRIDE", "4"))         # 1 par a cada N passos
+RIDGE_LAMBDA = 10.0
 SEED = 42
 
 
-def _textos_treino():
-    """Textos de alinhamento: GSM8K train (ou arquivo local via NOEMA_TEXTOS)."""
-    local = os.environ.get("NOEMA_TEXTOS")
+def _problemas_treino():
+    """Perguntas de treino: GSM8K train (ou jsonl local via NOEMA_TREINO_LOCAL)."""
+    local = os.environ.get("NOEMA_TREINO_LOCAL")
     if local:
         import metrics
-        return [t["texto"] for t in metrics.ler_jsonl(local)][:N_TEXTOS_TREINO]
+        return [p["pergunta"] for p in metrics.ler_jsonl(local)][:N_PROBLEMAS_TREINO]
     from datasets import load_dataset
     ds = load_dataset("gsm8k", "main", split="train")
-    return [ds[i]["question"] + "\n" + ds[i]["answer"]
-            for i in range(N_TEXTOS_TREINO)]
+    return [ds[i]["question"] for i in range(N_PROBLEMAS_TREINO)]
+
+
+def _n_corte():
+    import config
+    manifest = json.load(open(config.ARQ_MANIFEST, encoding="utf-8"))
+    return manifest[0]["n_corte"]
+
+
+@torch.no_grad()
+def _pensar_colhendo(tok, model, pergunta: str, n_corte: int):
+    """Gera o CoT greedy cortado em n_corte, colhendo pares
+    (hidden state no passo t, id do token emitido em t). Retorna também os
+    últimos K_ESTADOS hidden states (p/ avaliação)."""
+    import config
+    from transformers import DynamicCache
+    msgs = [{"role": "user", "content": pergunta + "\nPense passo a passo."}]
+    ids = tok.apply_chat_template(msgs, add_generation_prompt=True,
+                                  return_tensors="pt").to(config.DEVICE)
+    cache = DynamicCache()
+
+    def passo(x):
+        out = model(x, past_key_values=cache, use_cache=True,
+                    output_hidden_states=True,
+                    attention_mask=torch.ones(1, cache.get_seq_length() + x.shape[1],
+                                              dtype=torch.long, device=x.device))
+        return (out.hidden_states[-1][:, -1].to(torch.float32).cpu(),
+                out.logits[:, -1].argmax(-1, keepdim=True))
+
+    pares_h, pares_id, ultimos = [], [], []
+    h, nid = passo(ids)
+    for t in range(n_corte):
+        if nid.item() == tok.eos_token_id:
+            break
+        if t >= AQUECIMENTO and t % STRIDE_GEN == 0:
+            pares_h.append(h)
+            pares_id.append(nid.item())
+        ultimos.append(h)
+        del ultimos[:-K_ESTADOS]
+        h, nid = passo(nid)
+    return pares_h, pares_id, ultimos
 
 
 @torch.no_grad()
 def coletar(lado: str):
-    """Passa os textos de treino pelo modelo e colhe, em posições fixas (as
-    MESMAS nos dois lados — mesmo tokenizer): o hidden state final na posição t
-    e o embedding de entrada do token t+1. O Exp 0.5 mostrou que hidden states
-    injetados crus degeneram (fora de distribuição); por isso o adaptador é
-    treinado para decodificar estado → embedding do próximo token ("palavra
-    suave"), que é entrada nativa do receptor."""
-    import config
+    """O modelo raciocina sobre os problemas de treino, no MESMO regime da
+    avaliação. Lado B também computa os alvos de embedding (os ids de A foram
+    salvos na fase A; tokenizer compartilhado)."""
     import nucleo
     tok, model = nucleo.carregar_modelo()
-    emb = model.get_input_embeddings()
+    n_corte = _n_corte()
 
-    estados, alvos_emb, posicoes_usadas = [], [], []
-    for i, texto in enumerate(_textos_treino()):
-        ids = tok(texto, return_tensors="pt", truncation=True,
-                  max_length=MAX_TOK_TREINO).input_ids.to(config.DEVICE)
-        if ids.shape[1] < STRIDE + 1:
-            continue
-        out = model(ids, output_hidden_states=True)
-        h = out.hidden_states[-1][0]  # [seq, hidden]
-        pos = list(range(STRIDE - 1, ids.shape[1] - 1, STRIDE))
-        estados.append(h[pos].to(torch.float32).cpu())
-        alvos_emb.append(emb(ids[0, [p + 1 for p in pos]]).to(torch.float32).cpu())
-        posicoes_usadas.append(pos)
-        if i % 100 == 0:
-            print(f"[coleta/{lado}] {i}/{N_TEXTOS_TREINO}", flush=True)
+    todos_h, todos_id = [], []
+    for i, pergunta in enumerate(_problemas_treino()):
+        pares_h, pares_id, _ = _pensar_colhendo(tok, model, pergunta, n_corte)
+        todos_h += pares_h
+        todos_id += pares_id
+        if i % 25 == 0:
+            print(f"[coleta/{lado}] {i}/{N_PROBLEMAS_TREINO} "
+                  f"({len(todos_h)} pares)", flush=True)
 
     DIR_DADOS.mkdir(exist_ok=True)
-    torch.save({"estados": torch.cat(estados), "alvos_emb": torch.cat(alvos_emb),
-                "posicoes": posicoes_usadas},
-               DIR_DADOS / f"estados_{lado}.pt")
-    print(f"[coleta/{lado}] {sum(len(p) for p in posicoes_usadas)} estados "
-          f"de {N_TEXTOS_TREINO} textos", flush=True)
+    dados = {"estados": torch.cat(todos_h), "ids": todos_id}
+    if lado == "B":
+        emb = model.get_input_embeddings()
+        ids_b = torch.tensor(todos_id, device=model.device)
+        dados["alvos_self"] = emb(ids_b).to(torch.float32).cpu()
+        ids_a = torch.tensor(
+            torch.load(DIR_DADOS / "coleta_A.pt", weights_only=True)["ids"],
+            device=model.device)
+        dados["alvos_ponte"] = emb(ids_a).to(torch.float32).cpu()
+    torch.save(dados, DIR_DADOS / f"coleta_{lado}.pt")
+    print(f"[coleta/{lado}] {len(todos_h)} pares salvos", flush=True)
 
 
 def _ridge(X, Y):
@@ -97,75 +138,45 @@ def _ridge(X, Y):
 
 
 def treinar():
-    """Dois adaptadores ridge closed-form, ambos decodificando para o espaço de
-    EMBEDDINGS de B (entrada nativa do receptor):
-      W_ponte: h_A → emb_B(próximo token)   — a interlíngua
-      W_self:  h_B → emb_B(próximo token)   — o teto justo (mesmo canal, sem
-                                              travessia entre modelos)"""
+    """W_ponte: h_A(t) → emb_B(token emitido por A em t) — decodifica o
+    pensamento de A em palavras-suaves de B. W_self: idem dentro de B."""
     torch.manual_seed(SEED)
-    a = torch.load(DIR_DADOS / "estados_A.pt", weights_only=True)
-    b = torch.load(DIR_DADOS / "estados_B.pt", weights_only=True)
-    assert a["posicoes"] == b["posicoes"], "posições de coleta divergem entre A e B"
-    W_ponte, r1 = _ridge(a["estados"], b["alvos_emb"])
-    W_self, r2 = _ridge(b["estados"], b["alvos_emb"])
+    a = torch.load(DIR_DADOS / "coleta_A.pt", weights_only=True)
+    b = torch.load(DIR_DADOS / "coleta_B.pt", weights_only=True)
+    W_ponte, r1 = _ridge(a["estados"], b["alvos_ponte"])
+    W_self, r2 = _ridge(b["estados"], b["alvos_self"])
     torch.save({"W_ponte": W_ponte, "W_self": W_self}, DIR_DADOS / "adaptador.pt")
-    print(f"[treino] W_ponte {tuple(W_ponte.shape)} (erro rel. {r1:.3f}) | "
-          f"W_self {tuple(W_self.shape)} (erro rel. {r2:.3f})")
+    print(f"[treino] {len(a['estados'])} pares | W_ponte {tuple(W_ponte.shape)} "
+          f"(erro rel. {r1:.3f}) | W_self {tuple(W_self.shape)} (erro rel. {r2:.3f})")
 
 
 @torch.no_grad()
 def avaliar_a():
-    """A pensa nos 50 problemas do test (mesmo n_corte do Exp 0) e exporta h_A."""
+    """A pensa nos 50 problemas do test e exporta os últimos K hidden states."""
     import config
     import metrics
     import nucleo
     tok, model = nucleo.carregar_modelo()
-    problemas = metrics.ler_jsonl(config.ARQ_PROBLEMAS)
-    manifest0 = {m["id"]: m for m in
-                 json.load(open(config.ARQ_MANIFEST, encoding="utf-8"))}
-
-    from transformers import DynamicCache
+    n_corte = _n_corte()
     saida = {}
-    for p in problemas:
-        msgs = [{"role": "user", "content": p["pergunta"] + "\nPense passo a passo."}]
-        ids = tok.apply_chat_template(msgs, add_generation_prompt=True,
-                                      return_tensors="pt").to(config.DEVICE)
-        cache, ultimos = DynamicCache(), []
-
-        def passo(x):
-            out = model(x, past_key_values=cache, use_cache=True,
-                        output_hidden_states=True,
-                        attention_mask=torch.ones(
-                            1, cache.get_seq_length() + x.shape[1],
-                            dtype=torch.long, device=x.device))
-            ultimos.append(out.hidden_states[-1][:, -1:].to(torch.float32).cpu())
-            del ultimos[:-K_ESTADOS]
-            return out.logits[:, -1].argmax(-1, keepdim=True)
-
-        next_id = passo(ids)
-        for _ in range(manifest0[p["id"]]["n_corte"]):
-            if next_id.item() == tok.eos_token_id:
-                break
-            next_id = passo(next_id)
-        saida[p["id"]] = torch.cat(ultimos, dim=1)
+    for p in metrics.ler_jsonl(config.ARQ_PROBLEMAS):
+        _, _, ultimos = _pensar_colhendo(tok, model, p["pergunta"], n_corte)
+        saida[p["id"]] = torch.cat(ultimos)  # [K, dim_a]
         print(f"[aval/A] problema {p['id']} pensado", flush=True)
-
     DIR_DADOS.mkdir(exist_ok=True)
     torch.save(saida, DIR_DADOS / "eval_estados_A.pt")
 
 
 @torch.no_grad()
 def avaliar_b(cond: str):
-    """B (o modelo receptor) conclui a partir do pensamento traduzido."""
+    """B (o receptor) conclui a partir das palavras-suaves + sufixo."""
     import config
     import metrics
     import nucleo
+    from transformers import DynamicCache
     tok, model = nucleo.carregar_modelo()
-    problemas = metrics.ler_jsonl(config.ARQ_PROBLEMAS)
-    manifest0 = {m["id"]: m for m in
-                 json.load(open(config.ARQ_MANIFEST, encoding="utf-8"))}
+    n_corte = _n_corte()
     emb = model.get_input_embeddings()
-    dim_b = model.config.hidden_size
     ids_sufixo = tok(config.SUFIXO, return_tensors="pt",
                      add_special_tokens=False).input_ids.to(config.DEVICE)
 
@@ -179,42 +190,20 @@ def avaliar_b(cond: str):
     else:
         W_self = adaptadores["W_self"]
 
-    from transformers import DynamicCache
     linhas = []
-    for p in problemas:
+    for p in metrics.ler_jsonl(config.ARQ_PROBLEMAS):
         if cond == "teto":
-            # B pensa sozinho até o mesmo corte e usa os próprios h (Exp 0.5 em B)
-            msgs = [{"role": "user",
-                     "content": p["pergunta"] + "\nPense passo a passo."}]
-            ids = tok.apply_chat_template(msgs, add_generation_prompt=True,
-                                          return_tensors="pt").to(config.DEVICE)
-            cache_t, ultimos = DynamicCache(), []
-
-            def passo(x):
-                out = model(x, past_key_values=cache_t, use_cache=True,
-                            output_hidden_states=True,
-                            attention_mask=torch.ones(
-                                1, cache_t.get_seq_length() + x.shape[1],
-                                dtype=torch.long, device=x.device))
-                ultimos.append(out.hidden_states[-1][:, -1:])
-                del ultimos[:-K_ESTADOS]
-                return out.logits[:, -1].argmax(-1, keepdim=True)
-
-            nid = passo(ids)
-            for _ in range(manifest0[p["id"]]["n_corte"]):
-                if nid.item() == tok.eos_token_id:
-                    break
-                nid = passo(nid)
-            h_b = torch.cat(ultimos, dim=1)[0].to(torch.float32).cpu()  # [K, dim_b]
-            X = torch.cat([h_b, torch.ones(h_b.shape[0], 1)], dim=1)
-            h = (X @ W_self).unsqueeze(0).to(config.DEVICE, config.DTYPE)
+            _, _, ultimos = _pensar_colhendo(tok, model, p["pergunta"], n_corte)
+            h_orig = torch.cat(ultimos)          # [K, dim_b]
+            Wx = W_self
         else:
-            h_a = estados_a[p["id"]][0]  # [K, dim_a]
-            X = torch.cat([h_a, torch.ones(h_a.shape[0], 1)], dim=1)
-            h = (X @ W).unsqueeze(0).to(config.DEVICE, config.DTYPE)
+            h_orig = estados_a[p["id"]]          # [K, dim_a]
+            Wx = W
+        X = torch.cat([h_orig, torch.ones(h_orig.shape[0], 1)], dim=1)
+        h = (X @ Wx).unsqueeze(0).to(config.DEVICE, config.DTYPE)
 
         cache = DynamicCache()
-        x = torch.cat([h.to(config.DEVICE), emb(ids_sufixo)], dim=1)
+        x = torch.cat([h, emb(ids_sufixo)], dim=1)
         t0 = time.time()
         out = model(inputs_embeds=x, past_key_values=cache, use_cache=True,
                     attention_mask=torch.ones(1, x.shape[1], dtype=torch.long,
@@ -229,7 +218,8 @@ def avaliar_b(cond: str):
         texto = (tok.decode(torch.cat(resposta, dim=-1)[0],
                             skip_special_tokens=True) if resposta else "")
         linhas.append({"id": p["id"], "condicao": cond, "resposta_gerada": texto,
-                       "bytes": h.numel() * 2, "latencia_total_s": time.time() - t0})
+                       "bytes": h_orig.numel() * 2,
+                       "latencia_total_s": time.time() - t0})
         print(f"[aval/B/{cond}] {p['id']}: {texto[:55]!r}", flush=True)
 
     DIR_RESULTADOS.mkdir(exist_ok=True)
@@ -261,7 +251,8 @@ def main():
     if not config.ARQ_MANIFEST.exists():
         raise SystemExit("Rode o Exp 0 antes (precisa de problemas + manifest).")
 
-    print(f"[orq2] A = {MODEL_A}\n[orq2] B = {MODEL_B}", flush=True)
+    print(f"[orq2] v0.3 | A = {MODEL_A}\n[orq2] B = {MODEL_B} | K = {K_ESTADOS}",
+          flush=True)
     _sub("--coletar", MODEL_A, ("A",))
     _sub("--coletar", MODEL_B, ("B",))
     _sub("--treinar", MODEL_B)
@@ -270,14 +261,15 @@ def main():
         _sub("--avaliar-b", MODEL_B, (cond,))
 
     gold = {p["id"]: p["gold"] for p in metrics.ler_jsonl(config.ARQ_PROBLEMAS)}
-    rel = ["# Experimento 2 — Interlíngua: relatório", "",
-           f"A (pensa): `{MODEL_A}` → B (conclui): `{MODEL_B}` | adaptador ridge "
-           f"treinado com {N_TEXTOS_TREINO} textos do GSM8K train", "",
+    rel = ["# Experimento 2 v0.3 — Interlíngua: relatório", "",
+           f"A (pensa): `{MODEL_A}` → B (conclui): `{MODEL_B}` | K={K_ESTADOS} "
+           f"palavras-suaves | adaptador ridge treinado em estados de raciocínio "
+           f"reais ({N_PROBLEMAS_TREINO} problemas do GSM8K train)", "",
            "| Condição | Acurácia | Bytes/handoff |", "|---|---|---|"]
     for cond in ("ponte", "controle", "teto"):
         linhas = metrics.ler_jsonl(DIR_RESULTADOS / f"brutos_{cond}.jsonl")
-        saida = DIR_RESULTADOS / f"resultados_{cond}.jsonl"
-        with open(saida, "w", encoding="utf-8") as f:
+        with open(DIR_RESULTADOS / f"resultados_{cond}.jsonl", "w",
+                  encoding="utf-8") as f:
             for l in linhas:
                 l["resposta_correta"] = gold[l["id"]]
                 l["acertou"] = metrics.acertou(l["resposta_gerada"], gold[l["id"]])
