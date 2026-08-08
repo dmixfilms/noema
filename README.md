@@ -1,128 +1,146 @@
-# Noema — comunicação entre agentes sem texto como veículo do pensamento
+<div align="center">
 
-Experimentos com transferência direta de estado interno (KV-cache) entre agentes:
+# 🧠 Noema
 
-- **Experimento 0 — Handoff Latente** (`noema_exp0/`): o canal existe? *Resultado: sim —
-  L 56% × T 54% × Z 0% em 50 problemas GSM8K, 0 tokens de texto trafegados, KL = 0.*
-- **Experimento 1 — Wire Format** (`noema_exp1/`): quanto do cache é essencial?
-  *Resultado: int4 + últimas 24 camadas = 56% (igual ao baseline) com 17% dos bytes.*
-  Bônus: `fidelidade_exp1.py` mede o KL de cada configuração vs. o cache cheio.
-- **Experimento 0.5 — Pensamento contínuo** (`noema_exp05/`): em vez do cache (MB),
-  só os hidden states finais viajam (~KB), injetados em B via `inputs_embeds`.
-- **Experimento 2 — Interlíngua** (`noema_exp2/`): handoff entre modelos DIFERENTES
-  (Qwen2.5-3B → Qwen2.5-1.5B) via adaptador ridge treinado no GSM8K train.
-  *Resultado (v0.3): teto 6% × ponte 2% × controle 0% — o gargalo é a destilação
-  do estado em poucos vetores, não a travessia; exigiria treinar o receptor.*
-- **Experimento 4 — A esteira** (`noema_exp4/`): pipeline realista de 3 agentes
-  (extrator → calculador → verificador, mesmo checkpoint) comparando as duas vias:
-  cache entre agentes (entra token uma vez, sai uma vez) vs. texto (cada agente
-  relê tudo). Mede o custo composto por salto: tokens, prefill, handoff, acurácia.
+### Comunicação entre agentes de IA sem texto como veículo do pensamento
 
-  ```bash
-  cd noema_exp4
-  python run_exp4.py --smoke   # 3 problemas
-  python run_exp4.py           # 50 problemas × 3 etapas × 2 vias
-  ```
+*O agente A pensa. O agente B continua o pensamento — sem receber uma única palavra.*
 
-## Experimento 1 — como rodar
+![python](https://img.shields.io/badge/python-3.11-blue) ![modelo](https://img.shields.io/badge/modelo-Qwen2.5--3B--Instruct-8A2BE2) ![dataset](https://img.shields.io/badge/dataset-GSM8K-orange) ![reprodutível](https://img.shields.io/badge/greedy%20%7C%20seed%2042-reprodut%C3%ADvel-success)
 
-Pré-requisito: caches do Exp 0 em `noema_exp0/caches/` (gerados pela rodada completa;
-se foram apagados, regenere com `cd noema_exp0 && python agente_a.py`).
+![Resultados dos experimentos](docs/img/resultados.png)
 
-```bash
-cd noema_exp1
-python run_exp1.py                          # 9 configurações × 50 problemas
-python run_exp1.py --configs int8,int4      # subconjunto
-```
-
-Saída: `noema_exp1/resultados/relatorio_exp1.md` + `curva.png` (bytes × acurácia).
-Sem rede/GPU, o protocolo é validável com `python teste_mecanico_exp1.py`.
+</div>
 
 ---
 
-# Experimento 0: Handoff Latente
+## 💡 A ideia em 30 segundos
 
-Primeiro experimento do projeto **Noema**: comunicação entre agentes de IA sem texto como
-veículo do pensamento. O agente A raciocina sobre um problema do GSM8K, é interrompido no
-meio, e transfere seu **estado interno bruto (KV-cache)** — via disco, entre processos
-separados — para o agente B, que conclui o raciocínio **sem receber uma única palavra
-sobre o problema**.
+LLMs raciocinam num espaço vetorial contínuo. O texto que produzem é uma **serialização com perda** desse estado interno: quando o agente A explica algo em texto para o agente B, gigabytes de ativações viram ~200 tokens, e B reconstrói tudo do zero — pagando tempo, computação e perdendo nuance a cada fronteira.
 
-## Três condições
+O Noema testa a alternativa: **transferir o estado interno bruto** (o KV-cache — a "memória de trabalho" do modelo) diretamente de um agente para outro, por disco ou rede, entre processos separados.
 
-| Condição | O que B recebe | Custo medido |
-|---|---|---|
-| **T** (textual) | problema + raciocínio parcial de A, em texto | tokens de texto A→B |
-| **L** (latente) | KV-cache de A serializado + sufixo `"\nResposta final:"` | bytes do cache; **0 tokens de texto** |
-| **Z** (controle) | só o sufixo, sem cache e sem problema | — (acurácia esperada ≈ 0) |
+```mermaid
+flowchart LR
+    subgraph T["📄 Via textual (como agentes se comunicam hoje)"]
+        direction LR
+        U1[👤 problema] --> A1[Agente A<br/>pensa] -->|"~200 tokens de texto<br/>(serialização com perda)"| B1[Agente B<br/>RELÊ TUDO do zero] --> R1[resposta]
+    end
+```
 
-Mesmo checkpoint, geração greedy, seed fixa — as condições são comparáveis por construção.
+```mermaid
+flowchart LR
+    subgraph L["🧠 Via latente (a tese do Noema)"]
+        direction LR
+        U2[👤 problema] --> A2[Agente A<br/>pensa] -->|"KV-cache: o estado mental bruto<br/>0 tokens de texto"| B2[Agente B<br/>continua de onde A parou] --> R2[resposta]
+    end
+```
 
-## Reprodução
+Na via latente, B recebe apenas o sufixo fixo `"Resposta final:"` — **nunca vê o problema nem o raciocínio** — e mesmo assim conclui, porque herdou o pensamento pronto.
 
-Requisitos: Python 3.11, GPU CUDA com ≥8 GB VRAM para o modelo padrão
-(`Qwen/Qwen2.5-3B-Instruct` em FP16; ~6.5 GB).
+## 📊 Resultados — cinco experimentos, 50 problemas do GSM8K cada
+
+| # | Experimento | Pergunta | Resultado | Veredito |
+|---|---|---|---|---|
+| **0** | [Handoff Latente](noema_exp0/) | O canal existe? | **L 56% = T 54%**, controle 0%, fidelidade KL = 0 | ✅ existe, sem perda |
+| **1** | [Wire Format](noema_exp1/) | Quanto do cache é essencial? | **56% com 17% dos bytes** (int4 + 24 camadas) | ✅ compressão 6× grátis |
+| **0.5** | [Pensamento contínuo](noema_exp05/) | Um vetor carrega pensamento? | 0% — degeneração | ❌ exige treinar o receptor |
+| **2** | [Interlíngua](noema_exp2/) | Modelos diferentes se entendem? | teto 6% × ponte 2% × controle 0% | ❌ destilação é o gargalo |
+| **4** | [A esteira](noema_exp4/) | Uma pipeline real compensa? | **L 46% = T 46%** com **0 tokens** entre agentes | ✅ paridade sem retransmissão |
+
+📄 **Leitura completa dos números:** [`docs/relatorio-final.md`](docs/relatorio-final.md)
+
+## 🔍 Principais descobertas
+
+1. **O canal existe e é perfeito.** B herda o cache do disco e produz distribuições de próximo token *idênticas* às que A produziria (KL = 0,000). "B pensa de onde A parou" é medição, não metáfora.
+2. **O pensamento comprime 6× de graça.** Quantizar para int4 e cortar as 12 camadas rasas mantém a acurácia intacta com 17% dos bytes. E há duas formas de sobreviver à compressão: int8 pensa *igual* (KL ≈ 0); int4 pensa *diferente e acerta igual* (KL 2,1) — o raciocínio é robusto a perturbações no estado.
+3. **A janela temporal colapsa** neste regime: os últimos N tokens do cache não bastam, porque o enunciado mora no início. A informação essencial não está (só) no fim do pensamento.
+4. **Destilar o estado em poucos vetores mata o pensamento.** De 9,4 MB para 50 KB, a acurácia despenca de 56% para 6% — mesmo com adaptador treinado no domínio certo. Atravessar entre modelos diferentes exige treinar o receptor (fronteira de pesquisa aberta).
+5. **Redirecionar um pensamento herdado exige a gramática do modelo.** Instrução crua no meio do fluxo: 26%. A mesma instrução como turno estruturado do chat template: 46%. Continuação ≠ redirecionamento.
+6. **⚠️ O canal latente NÃO é criptografia.** O decodificador (o modelo) é público — quem tem o arquivo extrai o conteúdo. Segurança vem de criptografia clássica e da camada de auditoria ([detalhes](docs/ideia-roteador-cascata.md)).
+
+## ⚙️ Como funciona por dentro
+
+Sem `model.generate()`: cada token é um forward explícito com `DynamicCache`, para controle cirúrgico do estado. O handoff é **real** — processos separados, cache serializado em disco:
+
+```mermaid
+sequenceDiagram
+    participant A as 🤖 Processo A (agente_a.py)
+    participant D as 💾 Disco
+    participant B as 🤖 Processo B (agente_b.py)
+    A->>A: processa o problema + raciocina N tokens (corte a 60% do CoT)
+    A->>D: serializa o KV-cache (torch.save)
+    Note over A: processo termina
+    D->>B: carrega o cache (outro processo)
+    B->>B: injeta só "Resposta final:" e conclui
+    Note over B: nunca abre o arquivo de problemas
+```
+
+## 🚀 Reprodução
+
+Requisitos: Python 3.11, GPU CUDA com ≥8 GB VRAM (o modelo padrão ocupa ~6,5 GB em FP16).
 
 ```bash
 python -m venv noema_env
-noema_env\Scripts\activate                 # Windows
-# source noema_env/bin/activate            # Linux/macOS
+noema_env\Scripts\activate                 # Windows  (Linux/macOS: source noema_env/bin/activate)
 
 pip install torch --index-url https://download.pytorch.org/whl/cu121   # GPUs até Ada (RTX 40xx)
-# GPUs Blackwell (RTX 50xx, sm_120) exigem o wheel cu128:
-# pip install torch --index-url https://download.pytorch.org/whl/cu128
+# GPUs Blackwell (RTX 50xx): use  --index-url https://download.pytorch.org/whl/cu128
 pip install "transformers>=4.46,<5" accelerate datasets matplotlib
+```
 
+```bash
 cd noema_exp0
-python run_experiment.py --smoke           # 1) smoke test: 3 problemas, N fixo=80
-python run_experiment.py                   # 2) rodada completa: 50 problemas × 3 condições
-python run_experiment.py --kl              #    (opcional) + métrica de fidelidade (KL)
+python run_experiment.py --smoke     # 1) valida o protocolo (3 problemas)
+python run_experiment.py --kl        # 2) Exp 0 completo + fidelidade KL
+
+cd ../noema_exp1
+python run_exp1.py                   # 3) curvas de compressão (usa os caches do Exp 0)
+python fidelidade_exp1.py            #    + KL por configuração
+
+cd ../noema_exp05 && python run_exp05.py     # 4) pensamento contínuo
+cd ../noema_exp2  && python run_exp2.py      # 5) interlíngua (baixa o Qwen2.5-1.5B)
+cd ../noema_exp4  && python run_exp4.py      # 6) a esteira de 3 agentes
 ```
 
-Saídas em `noema_exp0/resultados/`: um `resultados_{T,L,Z}.jsonl` por condição,
-`relatorio.md` com a tabela comparativa e `grafico.png`.
+Tudo greedy com `seed 42` — os números são reprodutíveis bit a bit no mesmo hardware. **Sem GPU/rede**, cada experimento tem um teste mecânico offline (`teste_mecanico*.py`) que valida o protocolo inteiro com um modelo minúsculo de pesos aleatórios.
 
-Sem GPU (só para validar o protocolo — lento e com modelo menor):
+> ⚠️ **Não use Ollama**: ele só expõe API de texto. Este projeto exige acesso a `past_key_values`, hidden states e `inputs_embeds` — HuggingFace Transformers + PyTorch.
 
-```bash
-NOEMA_MODEL=Qwen/Qwen2.5-0.5B-Instruct python run_experiment.py --smoke
-```
-
-Modelos já baixados no cache local do HuggingFace (`~/.cache/huggingface`) são
-reaproveitados automaticamente; `NOEMA_MODEL` também aceita um caminho local.
-
-Sem rede nenhuma, há um smoke test mecânico que valida todo o protocolo (processos
-separados, serialização do cache, 3 condições, KL) com um modelo minúsculo de pesos
-aleatórios — não valida acurácia, valida o instrumento:
-
-```bash
-python teste_mecanico.py
-```
-
-## Estrutura
+## 📁 Estrutura
 
 ```
-noema_exp0/
-├── config.py          # modelo, n_problemas=50, cut_ratio=0.6, seed=42, paths
-├── nucleo.py          # geração manual token a token + (de)serialização do DynamicCache
-├── agente_a.py        # processo A: calibra N, pensa até o corte, serializa caches
-├── agente_b.py        # processo B: conclui a partir de cache (L) / texto (T) / nada (Z)
-├── run_experiment.py  # orquestra os subprocessos, corrige e agrega
-├── metrics.py         # extração da resposta numérica GSM8K, acurácia, custos
-├── report.py          # tabela final + gráfico (matplotlib)
-└── resultados/        # JSONL por condição + relatorio.md
+noema/
+├── noema_exp0/    # Exp 0 — o canal: A pensa, serializa o cache; B conclui às cegas
+├── noema_exp1/    # Exp 1 — wire format: quantização × janela × camadas + fidelidade KL
+├── noema_exp05/   # Exp 0.5 — pensamento contínuo (hidden states via inputs_embeds)
+├── noema_exp2/    # Exp 2 — interlíngua: 3B → 1.5B via adaptador ridge (3 versões)
+├── noema_exp4/    # Exp 4 — esteira: extrator → calculador → verificador, 2 vias
+└── docs/
+    ├── relatorio-final.md          # 📄 leitura consolidada dos 5 experimentos
+    ├── ideia-roteador-cascata.md   # 💡 o produto: cascata leve→pesado + nota de segurança
+    └── img/resultados.png
 ```
 
-Detalhes de protocolo:
+Cada `noema_exp*/resultados/` guarda os JSONL brutos (uma linha por problema/condição), o relatório em Markdown e os gráficos daquele experimento.
 
-- **Separação real de processos**: `agente_a.py` e `agente_b.py` rodam como subprocessos
-  independentes; o handoff latente passa por `caches/cache_problema_{i}.pt` no disco.
-  Na condição L, o processo B **nunca abre o arquivo de problemas** — lê apenas o
-  manifest de caches e o sufixo fixo.
-- **Calibração do corte**: N = 60% do comprimento médio de um CoT completo, medido num
-  piloto de 5 problemas (clamp em [32, 256]). Problemas em que A conclui antes do corte
-  recebem a flag `concluiu_antes_do_corte` e são reportados separadamente.
-- **Determinismo**: greedy em tudo, `torch.manual_seed(42)`.
-- **Compatibilidade de API**: a (de)serialização do `DynamicCache` funciona tanto com a
-  interface `key_cache/value_cache` quanto com a mais recente `cache.layers`, e a
-  reconstrução usa `cache.update()` (estável entre versões de transformers).
+## 🗺️ Roadmap
+
+- [x] **Exp 0** — o canal latente, calibrado e com controle negativo
+- [x] **Exp 1** — o formato de transmissão (curva bytes × inteligência transferida)
+- [x] **Exp 0.5 / Exp 2** — os limites: destilação e travessia entre modelos (nulos documentados)
+- [x] **Exp 4** — a esteira multi-agente com paridade de qualidade
+- [ ] **Roteador em cascata** — modelo leve na porta de entrada com autodetecção de incerteza, escalando para o pesado ([desenho](docs/ideia-roteador-cascata.md))
+- [ ] **Exp 2 v2** — interlíngua com treino do receptor (Coconut-style)
+- [ ] **Exp 3** — contratos: camada simbólica auditável sobre o canal latente
+- [ ] **A colmeia** — a esteira distribuída em várias GPUs físicas
+
+---
+
+<div align="center">
+
+*Projeto de pesquisa independente — construído, medido e documentado em uma RTX 3090.*
+
+*"O texto é a interface com o humano. Entre máquinas, o pensamento."*
+
+</div>
