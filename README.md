@@ -2,145 +2,147 @@
 
 # 🧠 Noema
 
-### Comunicação entre agentes de IA sem texto como veículo do pensamento
+### Agent-to-agent communication without text as the vehicle of thought
 
-*O agente A pensa. O agente B continua o pensamento — sem receber uma única palavra.*
+*Agent A thinks. Agent B continues the thought — without receiving a single word.*
 
-![python](https://img.shields.io/badge/python-3.11-blue) ![modelo](https://img.shields.io/badge/modelo-Qwen2.5--3B--Instruct-8A2BE2) ![dataset](https://img.shields.io/badge/dataset-GSM8K-orange) ![reprodutível](https://img.shields.io/badge/greedy%20%7C%20seed%2042-reprodut%C3%ADvel-success)
+**English** · [Português](README.pt-BR.md)
 
-![Resultados dos experimentos](docs/img/resultados.png)
+![python](https://img.shields.io/badge/python-3.11-blue) ![model](https://img.shields.io/badge/model-Qwen2.5--3B--Instruct-8A2BE2) ![dataset](https://img.shields.io/badge/dataset-GSM8K-orange) ![reproducible](https://img.shields.io/badge/greedy%20%7C%20seed%2042-reproducible-success)
+
+![Experiment results](docs/img/resultados.png)
 
 </div>
 
 ---
 
-## 💡 A ideia em 30 segundos
+## 💡 The idea in 30 seconds
 
-LLMs raciocinam num espaço vetorial contínuo. O texto que produzem é uma **serialização com perda** desse estado interno: quando o agente A explica algo em texto para o agente B, gigabytes de ativações viram ~200 tokens, e B reconstrói tudo do zero — pagando tempo, computação e perdendo nuance a cada fronteira.
+LLMs reason in a continuous vector space. The text they produce is a **lossy serialization** of that internal state: when agent A explains something to agent B in text, gigabytes of activations become ~200 tokens, and B rebuilds everything from scratch — paying time, compute, and losing nuance at every boundary.
 
-O Noema testa a alternativa: **transferir o estado interno bruto** (o KV-cache — a "memória de trabalho" do modelo) diretamente de um agente para outro, por disco ou rede, entre processos separados.
+Noema tests the alternative: **transferring the raw internal state** (the KV-cache — the model's "working memory") directly from one agent to another, over disk or network, between separate processes.
 
 ```mermaid
 flowchart LR
-    subgraph T["📄 Via textual (como agentes se comunicam hoje)"]
+    subgraph T["📄 Text channel (how agents communicate today)"]
         direction LR
-        U1[👤 problema] --> A1[Agente A<br/>pensa] -->|"~200 tokens de texto<br/>(serialização com perda)"| B1[Agente B<br/>RELÊ TUDO do zero] --> R1[resposta]
+        U1[👤 problem] --> A1[Agent A<br/>thinks] -->|"~200 text tokens<br/>(lossy serialization)"| B1[Agent B<br/>RE-READS everything] --> R1[answer]
     end
 ```
 
 ```mermaid
 flowchart LR
-    subgraph L["🧠 Via latente (a tese do Noema)"]
+    subgraph L["🧠 Latent channel (the Noema thesis)"]
         direction LR
-        U2[👤 problema] --> A2[Agente A<br/>pensa] -->|"KV-cache: o estado mental bruto<br/>0 tokens de texto"| B2[Agente B<br/>continua de onde A parou] --> R2[resposta]
+        U2[👤 problem] --> A2[Agent A<br/>thinks] -->|"KV-cache: the raw mental state<br/>0 text tokens"| B2[Agent B<br/>picks up where A left off] --> R2[answer]
     end
 ```
 
-Na via latente, B recebe apenas o sufixo fixo `"Resposta final:"` — **nunca vê o problema nem o raciocínio** — e mesmo assim conclui, porque herdou o pensamento pronto.
+In the latent channel, B receives only the fixed suffix `"Final answer:"` — it **never sees the problem or the reasoning** — and still finishes the job, because it inherited the finished thought.
 
-## 📊 Resultados — cinco experimentos, 50 problemas do GSM8K cada
+## 📊 Results — five experiments, 50 GSM8K problems each
 
-| # | Experimento | Pergunta | Resultado | Veredito |
+| # | Experiment | Question | Result | Verdict |
 |---|---|---|---|---|
-| **0** | [Handoff Latente](noema_exp0/) | O canal existe? | **L 56% = T 54%**, controle 0%, fidelidade KL = 0 | ✅ existe, sem perda |
-| **1** | [Wire Format](noema_exp1/) | Quanto do cache é essencial? | **56% com 17% dos bytes** (int4 + 24 camadas) | ✅ compressão 6× grátis |
-| **0.5** | [Pensamento contínuo](noema_exp05/) | Um vetor carrega pensamento? | 0% — degeneração | ❌ exige treinar o receptor |
-| **2** | [Interlíngua](noema_exp2/) | Modelos diferentes se entendem? | teto 6% × ponte 2% × controle 0% | ❌ destilação é o gargalo |
-| **4** | [A esteira](noema_exp4/) | Uma pipeline real compensa? | **L 46% = T 46%** com **0 tokens** entre agentes | ✅ paridade sem retransmissão |
+| **0** | [Latent Handoff](noema_exp0/) | Does the channel exist? | **L 56% = T 54%**, control 0%, fidelity KL = 0 | ✅ exists, lossless |
+| **1** | [Wire Format](noema_exp1/) | How much of the cache is essential? | **56% at 17% of the bytes** (int4 + 24 layers) | ✅ 6× compression for free |
+| **0.5** | [Continuous thought](noema_exp05/) | Can one vector carry a thought? | 0% — degeneration | ❌ requires training the receiver |
+| **2** | [Interlingua](noema_exp2/) | Can different models understand each other? | ceiling 6% × bridge 2% × control 0% | ❌ distillation is the bottleneck |
+| **4** | [The pipeline](noema_exp4/) | Does a real pipeline benefit? | **L 46% = T 46%** with **0 tokens** between agents | ✅ parity with zero retransmission |
 
-📄 **Leitura completa dos números:** [`docs/relatorio-final.md`](docs/relatorio-final.md)
+📄 **Full analysis:** [`docs/relatorio-final.md`](docs/relatorio-final.md)
 
-## 🔍 Principais descobertas
+## 🔍 Key findings
 
-1. **O canal existe e é perfeito.** B herda o cache do disco e produz distribuições de próximo token *idênticas* às que A produziria (KL = 0,000). "B pensa de onde A parou" é medição, não metáfora.
-2. **O pensamento comprime 6× de graça.** Quantizar para int4 e cortar as 12 camadas rasas mantém a acurácia intacta com 17% dos bytes. E há duas formas de sobreviver à compressão: int8 pensa *igual* (KL ≈ 0); int4 pensa *diferente e acerta igual* (KL 2,1) — o raciocínio é robusto a perturbações no estado.
-3. **A janela temporal colapsa** neste regime: os últimos N tokens do cache não bastam, porque o enunciado mora no início. A informação essencial não está (só) no fim do pensamento.
-4. **Destilar o estado em poucos vetores mata o pensamento.** De 9,4 MB para 50 KB, a acurácia despenca de 56% para 6% — mesmo com adaptador treinado no domínio certo. Atravessar entre modelos diferentes exige treinar o receptor (fronteira de pesquisa aberta).
-5. **Redirecionar um pensamento herdado exige a gramática do modelo.** Instrução crua no meio do fluxo: 26%. A mesma instrução como turno estruturado do chat template: 46%. Continuação ≠ redirecionamento.
-6. **⚠️ O canal latente NÃO é criptografia.** O decodificador (o modelo) é público — quem tem o arquivo extrai o conteúdo. Segurança vem de criptografia clássica e da camada de auditoria ([detalhes](docs/ideia-roteador-cascata.md)).
+1. **The channel exists and is perfect.** B inherits the cache from disk and produces next-token distributions *identical* to what A would produce (KL = 0.000). "B thinks from where A stopped" is a measurement, not a metaphor.
+2. **Thought compresses 6× for free.** Quantizing to int4 and dropping the 12 shallow layers keeps accuracy intact at 17% of the bytes. And there are two ways to survive compression: int8 thinks *the same* (KL ≈ 0); int4 thinks *differently and still gets it right* (KL 2.1) — reasoning is robust to state perturbations.
+3. **The temporal window collapses** in this regime: the last N tokens of the cache aren't enough, because the problem statement lives at the beginning. The essential information is not (only) at the end of the thought.
+4. **Distilling the state into a few vectors kills the thought.** From 9.4 MB to 50 KB, accuracy plummets from 56% to 6% — even with an adapter trained in-domain. Crossing between different models requires training the receiver (an open research frontier).
+5. **Redirecting an inherited thought requires the model's grammar.** Raw instruction injected mid-stream: 26%. The same instruction as a structured chat-template turn: 46%. Continuation ≠ redirection.
+6. **⚠️ The latent channel is NOT encryption.** The decoder (the model) is public — anyone with the file can extract the content. Security comes from classical cryptography and an audit layer ([details](docs/ideia-roteador-cascata.md)).
 
-## ⚙️ Como funciona por dentro
+## ⚙️ How it works under the hood
 
-Sem `model.generate()`: cada token é um forward explícito com `DynamicCache`, para controle cirúrgico do estado. O handoff é **real** — processos separados, cache serializado em disco:
+No `model.generate()`: every token is an explicit forward pass with `DynamicCache`, for surgical control of the state. The handoff is **real** — separate processes, cache serialized to disk:
 
 ```mermaid
 sequenceDiagram
-    participant A as 🤖 Processo A (agente_a.py)
-    participant D as 💾 Disco
-    participant B as 🤖 Processo B (agente_b.py)
-    A->>A: processa o problema + raciocina N tokens (corte a 60% do CoT)
-    A->>D: serializa o KV-cache (torch.save)
-    Note over A: processo termina
-    D->>B: carrega o cache (outro processo)
-    B->>B: injeta só "Resposta final:" e conclui
-    Note over B: nunca abre o arquivo de problemas
+    participant A as 🤖 Process A (agente_a.py)
+    participant D as 💾 Disk
+    participant B as 🤖 Process B (agente_b.py)
+    A->>A: processes the problem + reasons N tokens (cut at 60% of the CoT)
+    A->>D: serializes the KV-cache (torch.save)
+    Note over A: process exits
+    D->>B: loads the cache (different process)
+    B->>B: injects only "Final answer:" and finishes
+    Note over B: never opens the problems file
 ```
 
-## 🚀 Reprodução
+## 🚀 Reproducing
 
-Requisitos: Python 3.11, GPU CUDA com ≥8 GB VRAM (o modelo padrão ocupa ~6,5 GB em FP16).
+Requirements: Python 3.11, CUDA GPU with ≥8 GB VRAM (the default model takes ~6.5 GB in FP16).
 
 ```bash
 python -m venv noema_env
 noema_env\Scripts\activate                 # Windows  (Linux/macOS: source noema_env/bin/activate)
 
-pip install torch --index-url https://download.pytorch.org/whl/cu121   # GPUs até Ada (RTX 40xx)
-# GPUs Blackwell (RTX 50xx): use  --index-url https://download.pytorch.org/whl/cu128
+pip install torch --index-url https://download.pytorch.org/whl/cu121   # GPUs up to Ada (RTX 40xx)
+# Blackwell GPUs (RTX 50xx): use  --index-url https://download.pytorch.org/whl/cu128
 pip install "transformers>=4.46,<5" accelerate datasets matplotlib
 ```
 
 ```bash
 cd noema_exp0
-python run_experiment.py --smoke     # 1) valida o protocolo (3 problemas)
-python run_experiment.py --kl        # 2) Exp 0 completo + fidelidade KL
+python run_experiment.py --smoke     # 1) validate the protocol (3 problems)
+python run_experiment.py --kl        # 2) full Exp 0 + KL fidelity
 
 cd ../noema_exp1
-python run_exp1.py                   # 3) curvas de compressão (usa os caches do Exp 0)
-python fidelidade_exp1.py            #    + KL por configuração
+python run_exp1.py                   # 3) compression curves (reuses Exp 0 caches)
+python fidelidade_exp1.py            #    + KL per configuration
 
-cd ../noema_exp05 && python run_exp05.py     # 4) pensamento contínuo
-cd ../noema_exp2  && python run_exp2.py      # 5) interlíngua (baixa o Qwen2.5-1.5B)
-cd ../noema_exp4  && python run_exp4.py      # 6) a esteira de 3 agentes
+cd ../noema_exp05 && python run_exp05.py     # 4) continuous thought
+cd ../noema_exp2  && python run_exp2.py      # 5) interlingua (downloads Qwen2.5-1.5B)
+cd ../noema_exp4  && python run_exp4.py      # 6) the 3-agent pipeline
 ```
 
-Tudo greedy com `seed 42` — os números são reprodutíveis bit a bit no mesmo hardware. **Sem GPU/rede**, cada experimento tem um teste mecânico offline (`teste_mecanico*.py`) que valida o protocolo inteiro com um modelo minúsculo de pesos aleatórios.
+Everything is greedy with `seed 42` — numbers are bit-reproducible on the same hardware. **Without a GPU or network**, each experiment ships an offline mechanical test (`teste_mecanico*.py`) that validates the entire protocol with a tiny randomly-initialized model.
 
-> ⚠️ **Não use Ollama**: ele só expõe API de texto. Este projeto exige acesso a `past_key_values`, hidden states e `inputs_embeds` — HuggingFace Transformers + PyTorch.
+> ⚠️ **Don't use Ollama**: it only exposes a text API. This project requires access to `past_key_values`, hidden states and `inputs_embeds` — HuggingFace Transformers + PyTorch.
 
-## 📁 Estrutura
+## 📁 Structure
 
 ```
 noema/
-├── noema_exp0/    # Exp 0 — o canal: A pensa, serializa o cache; B conclui às cegas
-├── noema_exp1/    # Exp 1 — wire format: quantização × janela × camadas + fidelidade KL
-├── noema_exp05/   # Exp 0.5 — pensamento contínuo (hidden states via inputs_embeds)
-├── noema_exp2/    # Exp 2 — interlíngua: 3B → 1.5B via adaptador ridge (3 versões)
-├── noema_exp4/    # Exp 4 — esteira: extrator → calculador → verificador, 2 vias
+├── noema_exp0/    # Exp 0 — the channel: A thinks, serializes the cache; B finishes blind
+├── noema_exp1/    # Exp 1 — wire format: quantization × window × layers + KL fidelity
+├── noema_exp05/   # Exp 0.5 — continuous thought (hidden states via inputs_embeds)
+├── noema_exp2/    # Exp 2 — interlingua: 3B → 1.5B via ridge adapter (3 versions)
+├── noema_exp4/    # Exp 4 — pipeline: extractor → calculator → verifier, both channels
 └── docs/
-    ├── relatorio-final.md          # 📄 leitura consolidada dos 5 experimentos
-    ├── ideia-roteador-cascata.md   # 💡 o produto: cascata leve→pesado + nota de segurança
+    ├── relatorio-final.md          # 📄 consolidated analysis of all 5 experiments
+    ├── ideia-roteador-cascata.md   # 💡 the product: light→heavy cascade + security note
     └── img/resultados.png
 ```
 
-Cada `noema_exp*/resultados/` guarda os JSONL brutos (uma linha por problema/condição), o relatório em Markdown e os gráficos daquele experimento.
+Each `noema_exp*/resultados/` folder holds the raw JSONL (one line per problem/condition), the Markdown report and the charts for that experiment.
 
 ## 🗺️ Roadmap
 
-- [x] **Exp 0** — o canal latente, calibrado e com controle negativo
-- [x] **Exp 1** — o formato de transmissão (curva bytes × inteligência transferida)
-- [x] **Exp 0.5 / Exp 2** — os limites: destilação e travessia entre modelos (nulos documentados)
-- [x] **Exp 4** — a esteira multi-agente com paridade de qualidade
-- [ ] **Roteador em cascata** — modelo leve na porta de entrada com autodetecção de incerteza, escalando para o pesado ([desenho](docs/ideia-roteador-cascata.md))
-- [ ] **Exp 2 v2** — interlíngua com treino do receptor (Coconut-style)
-- [ ] **Exp 3** — contratos: camada simbólica auditável sobre o canal latente
-- [ ] **A colmeia** — a esteira distribuída em várias GPUs físicas
+- [x] **Exp 0** — the latent channel, calibrated with a negative control
+- [x] **Exp 1** — the wire format (bytes × transferred-intelligence curve)
+- [x] **Exp 0.5 / Exp 2** — the limits: distillation and cross-model transfer (documented nulls)
+- [x] **Exp 4** — the multi-agent pipeline with quality parity
+- [ ] **Cascade router** — a light front-door model with uncertainty self-detection, escalating to a heavy one ([design](docs/ideia-roteador-cascata.md))
+- [ ] **Exp 2 v2** — interlingua with receiver training (Coconut-style)
+- [ ] **Exp 3** — contracts: an auditable symbolic layer on top of the latent channel
+- [ ] **The hive** — the pipeline distributed across multiple physical GPUs
 
 ---
 
 <div align="center">
 
-*Projeto de pesquisa independente — construído, medido e documentado em uma RTX 3090.*
+*Independent research project — built, measured and documented on a single RTX 3090.*
 
-*"O texto é a interface com o humano. Entre máquinas, o pensamento."*
+*"Text is the interface for humans. Between machines, thought."*
 
 </div>
