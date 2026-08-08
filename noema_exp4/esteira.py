@@ -1,30 +1,36 @@
 """Definição da esteira de 3 agentes — Experimento 4.
 
-Papéis diferentes sobre o MESMO checkpoint (como 90% dos sistemas multi-agente
-reais são montados). O que muda entre os agentes é a função, não os pesos.
+Papéis diferentes sobre o MESMO checkpoint. O que muda entre os agentes é a
+função, não os pesos. A instrução de papel é fixa e não carrega conteúdo do
+problema (custo de protocolo, não de comunicação).
 
-Na via latente, a instrução de papel é o único texto injetado — ela é fixa e
-não carrega conteúdo do problema, então é contabilizada à parte (custo de
-protocolo, não de comunicação).
+Lição da 1ª rodada (L 26% × T 42%): injetar a instrução crua no meio do fluxo
+herdado tira o modelo da gramática de conversa e degrada a esteira latente.
+Na via L a instrução agora entra como TURNO estruturado (fecha o turno do
+assistente herdado → turno de usuário com a instrução → reabre o assistente),
+tudo com tokens fixos do template.
 """
 
 ETAPAS = [
     {
         "nome": "extrator",
-        "instrucao_papel": "Liste os dados numéricos do problema e o que se pede.",
+        "instrucao": "Liste os dados numéricos do problema e o que se pede.",
         "max_tokens": 96,
+        "prefixo_resposta": None,
     },
     {
         "nome": "calculador",
-        "instrucao_papel": "\n\nAgora faça as contas passo a passo com esses dados.",
+        "instrucao": "Agora faça as contas passo a passo com esses dados.",
         "max_tokens": 96,
-        # rótulo usado só na via textual, ao remontar o contexto em linguagem
         "rotulo_textual": "Dados extraídos",
+        "prefixo_resposta": None,
     },
     {
         "nome": "verificador",
-        "instrucao_papel": "\n\nConfira o cálculo e dê o resultado.\nResposta final:",
+        "instrucao": "Confira o cálculo e dê o resultado final.",
         "max_tokens": None,  # usa config.MAX_NEW_B
         "rotulo_textual": "Cálculo",
+        # entra já no turno do assistente, guiando a forma da resposta
+        "prefixo_resposta": "Resposta final:",
     },
 ]
