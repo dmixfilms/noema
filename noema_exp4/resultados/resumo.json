@@ -2,26 +2,26 @@
   {
     "condicao": "L",
     "n": 50,
-    "acuracia": 0.26,
+    "acuracia": 0.46,
     "tokens_conteudo_por_esteira": 0.0,
-    "bytes_cache_por_esteira": 17225679.76,
-    "prefill_saltos_s": 0.13738781929016114,
-    "handoff_saltos_s": 0.043197927474975584,
-    "esteira_total_s": 12.184309945106506,
+    "bytes_cache_por_esteira": 19410440.08,
+    "prefill_saltos_s": 0.17259340286254882,
+    "handoff_saltos_s": 0.05412437915802002,
+    "esteira_total_s": 35.02575861930847,
     "por_etapa": [
       {
         "papel": "extrator",
-        "prefill_s": 0.0703934383392334,
+        "prefill_s": 0.09379188537597656,
         "tokens_recebidos": 0.0
       },
       {
         "papel": "calculador",
-        "prefill_s": 0.06862040519714356,
+        "prefill_s": 0.08921839714050293,
         "tokens_recebidos": 0.0
       },
       {
         "papel": "verificador",
-        "prefill_s": 0.06876741409301758,
+        "prefill_s": 0.0833750057220459,
         "tokens_recebidos": 0.0
       }
     ]
@@ -29,26 +29,26 @@
   {
     "condicao": "T",
     "n": 50,
-    "acuracia": 0.42,
+    "acuracia": 0.46,
     "tokens_conteudo_por_esteira": 407.24,
     "bytes_cache_por_esteira": 0.0,
-    "prefill_saltos_s": 0.17972392082214356,
+    "prefill_saltos_s": 0.19688194274902343,
     "handoff_saltos_s": 0.0,
-    "esteira_total_s": 30.24249158859253,
+    "esteira_total_s": 31.717799425125122,
     "por_etapa": [
       {
         "papel": "extrator",
-        "prefill_s": 0.07995283603668213,
+        "prefill_s": 0.09720267772674561,
         "tokens_recebidos": 0.0
       },
       {
         "papel": "calculador",
-        "prefill_s": 0.08542788028717041,
+        "prefill_s": 0.0992222261428833,
         "tokens_recebidos": 155.68
       },
       {
         "papel": "verificador",
-        "prefill_s": 0.09429604053497315,
+        "prefill_s": 0.09765971660614013,
         "tokens_recebidos": 251.56
       }
     ]
