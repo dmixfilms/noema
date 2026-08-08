@@ -126,6 +126,36 @@ noema/
 
 Cada `noema_exp*/resultados/` guarda os JSONL brutos (uma linha por problema/condição), o relatório em Markdown e os gráficos daquele experimento.
 
+## ❓ FAQ
+
+<details>
+<summary><b>O Ollama não poderia fazer isso?</b></summary>
+
+Não — o Ollama só expõe API de texto (prompt entra, texto sai). Tudo que o Noema precisa fica atrás dessa porta: `past_key_values` (o KV-cache que serializamos e transferimos), hidden states, `inputs_embeds` e os logits completos (usados pra medir a fidelidade, KL = 0). O prompt cache interno do Ollama é uma otimização invisível para *a sua próxima mensagem na mesma sessão* — o Noema usa o cache como **meio de comunicação entre agentes distintos em processos distintos**: um artefato transferível, comprimível e mensurável. Nuance justa: o motor embaixo do Ollama (llama.cpp) tem save/restore de slot que reproduziria o handoff mais básico — mas nada da instrumentação científica (quantização por eixo, corte de camadas, KL de fidelidade, injeção de embeddings). Por isso o projeto usa HuggingFace Transformers + PyTorch: é o nível de acesso que a pesquisa exige.
+
+</details>
+
+<details>
+<summary><b>Não é o que os workflows do ChatGPT/Claude já fazem?</b></summary>
+
+Não — é justamente o contraste. Workflows multi-agente em APIs comerciais passam **texto** entre os agentes: A escreve, B relê e reconstrói o contexto do zero a cada salto (custo de tokens, latência de re-prefill, perda de nuance). As APIs comerciais não expõem o estado interno do modelo — o prompt caching delas é otimização de servidor para prefixos idênticos, não um estado transferível. O Noema faz o handoff uma camada abaixo: o estado bruto viaja entre processos como arquivo, com 0 tokens de texto e fidelidade medida. Isso só é possível com modelos locais de pesos abertos — exatamente o território que este projeto explora.
+
+</details>
+
+<details>
+<summary><b>Os grandes provedores já não fazem isso dentro dos próprios servidores?</b></summary>
+
+Em parte sim — e isso *valida* a premissa do Noema em vez de miná-la. Na camada de infraestrutura, os provedores movem KV-cache o tempo todo: prefix caching e inferência desagregada, onde o cache atravessa a rede entre os servidores de prefill e decode (Mooncake, vLLM, NVIDIA Dynamo). Mas o reuso deles é uma **otimização de identidade**: "já vi esse prefixo exato → não recalculo". Só funciona para o mesmo contexto, byte a byte — e os *agentes* deles continuam trocando texto entre si. O Noema usa o cache como **canal semântico**: um agente diferente herda um raciocínio no meio do caminho e o continua ou redireciona — e o projeto mede a ciência desse canal (limites de compressão, fidelidade KL, o que quebra e por quê). Essa camada de medição é o que não existe em documentação de provedor nenhum.
+
+</details>
+
+<details>
+<summary><b>O canal latente é mais seguro, já que humanos não conseguem ler?</b></summary>
+
+Não — e isso importa. O KV-cache contém os dados integralmente, e o decodificador (o modelo de pesos abertos) é público: quem tem o arquivo extrai o conteúdo — o próprio `agente_b.py` deste repositório é a ferramenta de extração. Ilegível a olho nu é obscuridade, não segurança; e ainda cega as ferramentas de auditoria. Proteção real vem de criptografia clássica, perímetros de confiança e da camada de contratos simbólicos planejada (Exp 3). Nota completa em [`docs/ideia-roteador-cascata.md`](docs/ideia-roteador-cascata.md).
+
+</details>
+
 ## 🗺️ Roadmap
 
 - [x] **Exp 0** — o canal latente, calibrado e com controle negativo
