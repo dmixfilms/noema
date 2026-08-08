@@ -32,7 +32,7 @@ def main():
                    check=True, cwd=EXP0, env=env)
 
     env2 = dict(os.environ, NOEMA_MODEL_A=str(DIR_A), NOEMA_MODEL_B=str(DIR_B),
-                NOEMA_TEXTOS=str(textos))
+                NOEMA_TEXTOS=str(textos), NOEMA_STRIDE="4")
     subprocess.run([sys.executable, str(RAIZ / "run_exp2.py")],
                    check=True, cwd=RAIZ, env=env2)
 
@@ -42,15 +42,18 @@ def main():
         linhas = metrics.ler_jsonl(RAIZ / "resultados" / f"resultados_{cond}.jsonl")
         if len(linhas) != 3:
             falhas.append(f"{cond}: {len(linhas)} linhas (esperava 3)")
-    W = __import__("torch").load(RAIZ / "dados" / "adaptador.pt",
-                                 weights_only=True)["W"]
-    if tuple(W.shape) != (65, 48):
-        falhas.append(f"adaptador com forma errada: {tuple(W.shape)}")
+    ad = __import__("torch").load(RAIZ / "dados" / "adaptador.pt",
+                                  weights_only=True)
+    if tuple(ad["W_ponte"].shape) != (65, 48):
+        falhas.append(f"W_ponte com forma errada: {tuple(ad['W_ponte'].shape)}")
+    if tuple(ad["W_self"].shape) != (49, 48):
+        falhas.append(f"W_self com forma errada: {tuple(ad['W_self'].shape)}")
     if falhas:
         for f in falhas:
             print("  -", f)
         raise SystemExit(1)
-    print(f"\n[teste2] OK — ponte 64d→48d validada mecanicamente (W {tuple(W.shape)})")
+    print(f"\n[teste2] OK — ponte 64d→48d validada mecanicamente "
+          f"(W_ponte {tuple(ad['W_ponte'].shape)}, W_self {tuple(ad['W_self'].shape)})")
 
 
 if __name__ == "__main__":

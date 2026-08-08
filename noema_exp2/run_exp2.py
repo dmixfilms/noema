@@ -34,7 +34,7 @@ DIR_DADOS = RAIZ / "dados"
 DIR_RESULTADOS = RAIZ / "resultados"
 N_TEXTOS_TREINO = 400
 MAX_TOK_TREINO = 192
-STRIDE = 16           # coleta um hidden state a cada STRIDE tokens
+STRIDE = int(os.environ.get("NOEMA_STRIDE", "16"))  # 1 estado a cada STRIDE tokens
 K_ESTADOS = 4
 RIDGE_LAMBDA = 1.0
 SEED = 42
@@ -54,44 +54,63 @@ def _textos_treino():
 
 @torch.no_grad()
 def coletar(lado: str):
-    """Passa os textos de treino pelo modelo e colhe hidden states finais
-    em posições fixas — as MESMAS posições nos dois lados (mesmo tokenizer)."""
+    """Passa os textos de treino pelo modelo e colhe, em posições fixas (as
+    MESMAS nos dois lados — mesmo tokenizer): o hidden state final na posição t
+    e o embedding de entrada do token t+1. O Exp 0.5 mostrou que hidden states
+    injetados crus degeneram (fora de distribuição); por isso o adaptador é
+    treinado para decodificar estado → embedding do próximo token ("palavra
+    suave"), que é entrada nativa do receptor."""
     import config
     import nucleo
     tok, model = nucleo.carregar_modelo()
+    emb = model.get_input_embeddings()
 
-    estados, posicoes_usadas = [], []
+    estados, alvos_emb, posicoes_usadas = [], [], []
     for i, texto in enumerate(_textos_treino()):
         ids = tok(texto, return_tensors="pt", truncation=True,
                   max_length=MAX_TOK_TREINO).input_ids.to(config.DEVICE)
+        if ids.shape[1] < STRIDE + 1:
+            continue
         out = model(ids, output_hidden_states=True)
         h = out.hidden_states[-1][0]  # [seq, hidden]
-        pos = list(range(STRIDE - 1, ids.shape[1], STRIDE))
+        pos = list(range(STRIDE - 1, ids.shape[1] - 1, STRIDE))
         estados.append(h[pos].to(torch.float32).cpu())
+        alvos_emb.append(emb(ids[0, [p + 1 for p in pos]]).to(torch.float32).cpu())
         posicoes_usadas.append(pos)
         if i % 100 == 0:
             print(f"[coleta/{lado}] {i}/{N_TEXTOS_TREINO}", flush=True)
 
     DIR_DADOS.mkdir(exist_ok=True)
-    torch.save({"estados": torch.cat(estados), "posicoes": posicoes_usadas},
+    torch.save({"estados": torch.cat(estados), "alvos_emb": torch.cat(alvos_emb),
+                "posicoes": posicoes_usadas},
                DIR_DADOS / f"estados_{lado}.pt")
     print(f"[coleta/{lado}] {sum(len(p) for p in posicoes_usadas)} estados "
           f"de {N_TEXTOS_TREINO} textos", flush=True)
 
 
+def _ridge(X, Y):
+    Xa = torch.cat([X, torch.ones(len(X), 1)], dim=1)
+    XtX = Xa.T @ Xa + RIDGE_LAMBDA * torch.eye(Xa.shape[1])
+    W = torch.linalg.solve(XtX, Xa.T @ Y)
+    residuo = ((Xa @ W - Y).pow(2).mean().sqrt() / Y.pow(2).mean().sqrt()).item()
+    return W, residuo
+
+
 def treinar():
-    """Ridge closed-form: W = (XᵀX + λI)⁻¹ XᵀY, com coluna de viés."""
+    """Dois adaptadores ridge closed-form, ambos decodificando para o espaço de
+    EMBEDDINGS de B (entrada nativa do receptor):
+      W_ponte: h_A → emb_B(próximo token)   — a interlíngua
+      W_self:  h_B → emb_B(próximo token)   — o teto justo (mesmo canal, sem
+                                              travessia entre modelos)"""
     torch.manual_seed(SEED)
     a = torch.load(DIR_DADOS / "estados_A.pt", weights_only=True)
     b = torch.load(DIR_DADOS / "estados_B.pt", weights_only=True)
     assert a["posicoes"] == b["posicoes"], "posições de coleta divergem entre A e B"
-    X = torch.cat([a["estados"], torch.ones(len(a["estados"]), 1)], dim=1)
-    Y = b["estados"]
-    XtX = X.T @ X + RIDGE_LAMBDA * torch.eye(X.shape[1])
-    W = torch.linalg.solve(XtX, X.T @ Y)  # [dim_a+1, dim_b]
-    residuo = (X @ W - Y).pow(2).mean().sqrt() / Y.pow(2).mean().sqrt()
-    torch.save({"W": W}, DIR_DADOS / "adaptador.pt")
-    print(f"[treino] W {tuple(W.shape)} | erro relativo no treino: {residuo:.3f}")
+    W_ponte, r1 = _ridge(a["estados"], b["alvos_emb"])
+    W_self, r2 = _ridge(b["estados"], b["alvos_emb"])
+    torch.save({"W_ponte": W_ponte, "W_self": W_self}, DIR_DADOS / "adaptador.pt")
+    print(f"[treino] W_ponte {tuple(W_ponte.shape)} (erro rel. {r1:.3f}) | "
+          f"W_self {tuple(W_self.shape)} (erro rel. {r2:.3f})")
 
 
 @torch.no_grad()
@@ -150,12 +169,15 @@ def avaliar_b(cond: str):
     ids_sufixo = tok(config.SUFIXO, return_tensors="pt",
                      add_special_tokens=False).input_ids.to(config.DEVICE)
 
+    adaptadores = torch.load(DIR_DADOS / "adaptador.pt", weights_only=True)
     if cond in ("ponte", "controle"):
         estados_a = torch.load(DIR_DADOS / "eval_estados_A.pt", weights_only=True)
-        W = torch.load(DIR_DADOS / "adaptador.pt", weights_only=True)["W"]
+        W = adaptadores["W_ponte"]
         if cond == "controle":
             torch.manual_seed(SEED)
             W = torch.randn_like(W) * W.std()
+    else:
+        W_self = adaptadores["W_self"]
 
     from transformers import DynamicCache
     linhas = []
@@ -183,7 +205,9 @@ def avaliar_b(cond: str):
                 if nid.item() == tok.eos_token_id:
                     break
                 nid = passo(nid)
-            h = torch.cat(ultimos, dim=1).to(config.DTYPE)
+            h_b = torch.cat(ultimos, dim=1)[0].to(torch.float32).cpu()  # [K, dim_b]
+            X = torch.cat([h_b, torch.ones(h_b.shape[0], 1)], dim=1)
+            h = (X @ W_self).unsqueeze(0).to(config.DEVICE, config.DTYPE)
         else:
             h_a = estados_a[p["id"]][0]  # [K, dim_a]
             X = torch.cat([h_a, torch.ones(h_a.shape[0], 1)], dim=1)
@@ -205,7 +229,7 @@ def avaliar_b(cond: str):
         texto = (tok.decode(torch.cat(resposta, dim=-1)[0],
                             skip_special_tokens=True) if resposta else "")
         linhas.append({"id": p["id"], "condicao": cond, "resposta_gerada": texto,
-                       "bytes": h.numel() * 4, "latencia_total_s": time.time() - t0})
+                       "bytes": h.numel() * 2, "latencia_total_s": time.time() - t0})
         print(f"[aval/B/{cond}] {p['id']}: {texto[:55]!r}", flush=True)
 
     DIR_RESULTADOS.mkdir(exist_ok=True)
