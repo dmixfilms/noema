@@ -11,7 +11,18 @@ Experimentos com transferência direta de estado interno (KV-cache) entre agente
   só os hidden states finais viajam (~KB), injetados em B via `inputs_embeds`.
 - **Experimento 2 — Interlíngua** (`noema_exp2/`): handoff entre modelos DIFERENTES
   (Qwen2.5-3B → Qwen2.5-1.5B) via adaptador ridge treinado no GSM8K train.
-  Condições: ponte (h_A×W→B) × controle (W aleatória) × teto (B com os próprios h).
+  *Resultado (v0.3): teto 6% × ponte 2% × controle 0% — o gargalo é a destilação
+  do estado em poucos vetores, não a travessia; exigiria treinar o receptor.*
+- **Experimento 4 — A esteira** (`noema_exp4/`): pipeline realista de 3 agentes
+  (extrator → calculador → verificador, mesmo checkpoint) comparando as duas vias:
+  cache entre agentes (entra token uma vez, sai uma vez) vs. texto (cada agente
+  relê tudo). Mede o custo composto por salto: tokens, prefill, handoff, acurácia.
+
+  ```bash
+  cd noema_exp4
+  python run_exp4.py --smoke   # 3 problemas
+  python run_exp4.py           # 50 problemas × 3 etapas × 2 vias
+  ```
 
 ## Experimento 1 — como rodar
 
