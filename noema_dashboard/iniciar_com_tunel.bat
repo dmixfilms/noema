@@ -5,6 +5,7 @@ rem A URL publica aparece abaixo (https://....trycloudflare.com) — muda a cada
 rem AVISO: o dashboard nao tem senha; nao compartilhe a URL e feche esta janela ao terminar.
 
 cd /d "%~dp0"
+if "%NOEMA_PORT%"=="" set NOEMA_PORT=8878
 start "Noema Dashboard" "..\noema_env\Scripts\python.exe" servidor.py
 timeout /t 3 /nobreak >nul
-cloudflared tunnel --url http://localhost:7860
+cloudflared tunnel --url http://localhost:%NOEMA_PORT%
