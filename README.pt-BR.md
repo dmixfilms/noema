@@ -59,7 +59,7 @@ Na via latente, B recebe apenas o sufixo fixo `"Resposta final:"` — **nunca v�
 3. **A janela temporal colapsa** neste regime: os últimos N tokens do cache não bastam, porque o enunciado mora no início. A informação essencial não está (só) no fim do pensamento.
 4. **Destilar o estado em poucos vetores mata o pensamento.** De 9,4 MB para 50 KB, a acurácia despenca de 56% para 6% — mesmo com adaptador treinado no domínio certo. Atravessar entre modelos diferentes exige treinar o receptor (fronteira de pesquisa aberta).
 5. **Redirecionar um pensamento herdado exige a gramática do modelo.** Instrução crua no meio do fluxo: 26%. A mesma instrução como turno estruturado do chat template: 46%. Continuação ≠ redirecionamento.
-6. **⚠️ O canal latente NÃO é criptografia.** O decodificador (o modelo) é público — quem tem o arquivo extrai o conteúdo. Segurança vem de criptografia clássica e da camada de auditoria ([detalhes](docs/ideia-roteador-cascata.md)).
+6. **⚠️ O canal latente NÃO é criptografia.** O decodificador (o modelo) é público — quem tem o arquivo extrai o conteúdo. Segurança vem de criptografia clássica e camada de auditoria ([detalhes](docs/ideia-roteador-cascata.md)).
 
 ## ⚙️ Como funciona por dentro
 
@@ -77,6 +77,23 @@ sequenceDiagram
     B->>B: injeta só "Resposta final:" e conclui
     Note over B: nunca abre o arquivo de problemas
 ```
+
+## 🖥️ Dashboard — veja funcionando no navegador
+
+O jeito mais fácil de experimentar o projeto: um dashboard web local com
+**playground de handoff ao vivo** (digite uma pergunta, veja A ser cortado no
+meio do pensamento e B concluir sem ter visto uma palavra), execução dos
+experimentos com um clique, log ao vivo e parâmetros ajustáveis (modelo, ponto
+de corte, número de problemas), e visualização dos resultados.
+
+```bash
+pip install fastapi uvicorn
+cd noema_dashboard
+python servidor.py            # → http://localhost:7860
+```
+
+Escolha qualquer modelo Qwen sugerido (0.5B roda em GPUs modestas; 3B reproduz
+os números do relatório) ou digite qualquer id do HuggingFace.
 
 ## 🚀 Reprodução
 
@@ -118,6 +135,7 @@ noema/
 ├── noema_exp05/   # Exp 0.5 — pensamento contínuo (hidden states via inputs_embeds)
 ├── noema_exp2/    # Exp 2 — interlíngua: 3B → 1.5B via adaptador ridge (3 versões)
 ├── noema_exp4/    # Exp 4 — esteira: extrator → calculador → verificador, 2 vias
+├── noema_dashboard/  # 🖥️ UI web local: playground, execuções, logs, resultados
 └── docs/
     ├── relatorio-final.md          # 📄 leitura consolidada dos 5 experimentos
     ├── ideia-roteador-cascata.md   # 💡 o produto: cascata leve→pesado + nota de segurança
@@ -160,7 +178,7 @@ Não — e isso importa. O KV-cache contém os dados integralmente, e o decodifi
 
 - [x] **Exp 0** — o canal latente, calibrado e com controle negativo
 - [x] **Exp 1** — o formato de transmissão (curva bytes × inteligência transferida)
-- [x] **Exp 0.5 / Exp 2** — os limites: destilação e travessia entre modelos (nulos documentados)
+- [x] **Exp 0.5 / Exp 2** — os limites: destilação e ponte entre modelos (nulos documentados)
 - [x] **Exp 4** — a esteira multi-agente com paridade de qualidade
 - [ ] **Roteador em cascata** — modelo leve na porta de entrada com autodetecção de incerteza, escalando para o pesado ([desenho](docs/ideia-roteador-cascata.md))
 - [ ] **Exp 2 v2** — interlíngua com treino do receptor (Coconut-style)
