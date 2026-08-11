@@ -78,6 +78,22 @@ sequenceDiagram
     Note over B: never opens the problems file
 ```
 
+## 🖥️ Dashboard — see it working in your browser
+
+The easiest way to experience the project: a local web dashboard with a **live
+handoff playground** (type a question, watch A get cut mid-thought and B finish
+it having seen zero words), one-click experiment runs with live logs and
+adjustable parameters (model, cut point, number of problems), and a results view.
+
+```bash
+pip install fastapi uvicorn
+cd noema_dashboard
+python servidor.py            # → http://localhost:7860
+```
+
+Pick any suggested Qwen model (0.5B runs on modest GPUs; 3B reproduces the
+paper numbers) or type any HuggingFace model id.
+
 ## 🚀 Reproducing
 
 Requirements: Python 3.11, CUDA GPU with ≥8 GB VRAM (the default model takes ~6.5 GB in FP16).
@@ -118,6 +134,7 @@ noema/
 ├── noema_exp05/   # Exp 0.5 — continuous thought (hidden states via inputs_embeds)
 ├── noema_exp2/    # Exp 2 — interlingua: 3B → 1.5B via ridge adapter (3 versions)
 ├── noema_exp4/    # Exp 4 — pipeline: extractor → calculator → verifier, both channels
+├── noema_dashboard/  # 🖥️ local web UI: playground, runs, live logs, results
 └── docs/
     ├── relatorio-final.md          # 📄 consolidated analysis of all 5 experiments
     ├── ideia-roteador-cascata.md   # 💡 the product: light→heavy cascade + security note
