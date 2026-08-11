@@ -277,5 +277,6 @@ def index():
 
 if __name__ == "__main__":
     import uvicorn
-    print("\n  Noema Dashboard →  http://localhost:7860\n")
-    uvicorn.run(app, host="127.0.0.1", port=7860, log_level="warning")
+    porta = int(os.environ.get("NOEMA_PORT", "7860"))
+    print(f"\n  Noema Dashboard →  http://localhost:{porta}\n")
+    uvicorn.run(app, host="127.0.0.1", port=porta, log_level="warning")
